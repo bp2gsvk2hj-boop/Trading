@@ -1,0 +1,13 @@
+[project]
+name = "moex-hft"
+version = "0.1.0"
+description = "HFT маркет-мейкер для фьючерсов Московской биржи: стратегия, риск, бэктест"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
