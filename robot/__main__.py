@@ -66,7 +66,7 @@ def cmd_loop(a, cfg):
 
 
 def cmd_status(a, cfg):
-    print(json.dumps(Engine(cfg).status(), indent=1, ensure_ascii=False))
+    print(json.dumps(Engine(cfg, read_only=True).status(), indent=1, ensure_ascii=False))
 
 
 def cmd_flatten(a, cfg):

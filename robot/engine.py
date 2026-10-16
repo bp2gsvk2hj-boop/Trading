@@ -29,8 +29,9 @@ class Halted(RuntimeError):
 
 
 class Engine:
-    def __init__(self, cfg: Config, client: Client | None = None, dry_run: bool = False):
+    def __init__(self, cfg: Config, client: Client | None = None, dry_run: bool = False, read_only: bool = False):
         self.cfg = cfg
+        self.read_only = read_only  # status queries: no orders, so no live opt-in needed
         self.c = client or Client()
         self.dry = dry_run
         self.state_path = cfg.state_dir / "state.json"
@@ -49,7 +50,7 @@ class Engine:
                                cfg.risk.slippage_ticks, cfg.risk.fee_rate)
         if not cfg.account_id:
             raise ValueError(f"mode={cfg.mode} needs robot.account_id in {cfg.path.name}")
-        if cfg.mode == "live" and os.environ.get(LIVE_ENV) != "yes":
+        if cfg.mode == "live" and not self.read_only and os.environ.get(LIVE_ENV) != "yes":
             raise Halted(f"live mode needs {LIVE_ENV}=yes in the environment (explicit opt-in)")
         return ApiBroker(self.c, cfg.account_id, sandbox=cfg.mode == "sandbox")
 

@@ -231,6 +231,7 @@ class EngineTest(unittest.TestCase):
                      sessions=Sessions(), slots=[], path=Path(self.tmp.name) / "robot.toml")
         with self.assertRaises(Halted):
             Engine(cfg, client=FakeClient([]))
+        Engine(cfg, client=FakeClient([]), read_only=True)   # status needs no opt-in
 
 
 if __name__ == "__main__":
