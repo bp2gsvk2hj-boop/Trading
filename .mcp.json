@@ -8,7 +8,10 @@
         "https://invest-public-api.tbank.ru/mcp",
         "--header",
         "Authorization:Bearer ${TINVEST_TOKEN}"
-      ]
+      ],
+      "env": {
+        "NODE_EXTRA_CA_CERTS": "certs/russian-trusted-ca.pem"
+      }
     }
   }
 }
