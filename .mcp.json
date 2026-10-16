@@ -1,14 +1,8 @@
 {
   "mcpServers": {
     "t-invest": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://invest-public-api.tbank.ru/mcp",
-        "--header",
-        "Authorization:Bearer ${TINVEST_TOKEN}"
-      ]
+      "command": "sh",
+      "args": ["scripts/tinvest-mcp.sh"]
     }
   }
 }
