@@ -34,6 +34,13 @@ reported to the user explicitly, never just logged.
   the numbers to the user before changing `robot.toml`. Do not tune parameters to the test
   period; prefer settings that work across neighboring values.
 
+## Cloud scheduled runs
+
+Each scheduled run is a fresh container: `state/` (journal, HALT file) does not survive between
+runs. The broker is the source of truth for positions and stops, so trading is unaffected, but:
+the run report in the session transcript is the journal, and stopping the robot means disabling
+its scheduled task (plus `python -m robot flatten` if positions must be closed), not `halt`.
+
 ## Useful commands
 
 ```bash
