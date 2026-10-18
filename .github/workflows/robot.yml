@@ -31,6 +31,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # state/ (journal, last seen bar, Telegram cursor) survives between runs via the cache.
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: robot-state-${{ github.run_id }}
+          restore-keys: robot-state-
       - name: Robot command
         id: command
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.command != 'run' }}
@@ -58,7 +65,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FAILED: ${{ steps.pass.outcome == 'failure' || steps.command.outcome == 'failure' }}
         run: |
-          args=(--run run.log --status status.json
+          args=(--run run.log --status status.json --trades
                 --url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
           [ "$FAILED" = "true" ] && args+=(--exit-code 1)
           # Last scheduled pass of the day (18:07 MSK, may start late) and manual runs: always report.
@@ -66,3 +73,9 @@ jobs:
             args+=(--summary)
           fi
           python3 -m robot.telegram "${args[@]}"
+      - name: Save state
+        if: ${{ always() }}
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: robot-state-${{ github.run_id }}

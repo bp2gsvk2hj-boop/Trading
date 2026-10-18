@@ -247,19 +247,49 @@ class TelegramTest(unittest.TestCase):
     def test_quiet_pass_sends_nothing(self):
         from robot.telegram import build
         self.assertIsNone(build("[skip] ticker=X, why=only 3 bars\n", self.STATUS, 0, False))
+        self.assertIsNone(build("[entered] ticker=CNYRUBF, side=-1, qty=1\n", self.STATUS, 0, False))
 
-    def test_activity_and_summary(self):
+    def test_summary(self):
         from robot.telegram import build
-        msg = build("[entered] ticker=CNYRUBF, side=-1, qty=1, stop=12.532\n", self.STATUS, 0, False)
-        self.assertIn("Вход: ticker=CNYRUBF", msg)
+        msg = build("", self.STATUS, 0, True)
+        self.assertIn("Итог дня", msg)
         self.assertIn("CNYRUBF: шорт 1 @ 12.449", msg)
         self.assertIn("стоп 12.532", msg)
-        self.assertIn("Итог дня", build("", self.STATUS, 0, True))
+
+    def test_trades(self):
+        from robot.telegram import trade_messages
+        t = datetime(2026, 10, 19, 8, 0, tzinfo=timezone.utc)
+        tr = lambda side, qty, px, stop=False, k=0: {"ticker": "CNYRUBF", "t": t + timedelta(hours=k), "side": side,
+                                                     "qty": qty, "price": px, "point_value": 1000.0, "by_stop": stop}
+        pos = {}
+        msgs = trade_messages([tr(-1, 1, 12.449), tr(1, 1, 12.532, stop=True, k=1)], pos, {"CNYRUBF": "breakout"})
+        self.assertIn("Открыта позиция CNYRUBF: шорт 1 по 12.449 (11:00 МСК)", msgs[0])
+        self.assertIn("Причина: breakout", msgs[0])
+        self.assertIn("Закрыта позиция по стопу CNYRUBF", msgs[1])
+        self.assertIn("результат -83 ₽", msgs[1])
+        self.assertEqual(pos["CNYRUBF"]["qty"], 0)
+        # Flip from long 1 to short 1 in one trade: close with P&L, then open.
+        pos = {"CNYRUBF": {"qty": 1, "avg": 12.0}}
+        msgs = trade_messages([tr(-1, 2, 12.1)], pos, {})
+        self.assertIn("результат +100 ₽", msgs[0])
+        self.assertIn("Открыта позиция CNYRUBF: шорт 1", msgs[1])
+        self.assertEqual(pos["CNYRUBF"], {"qty": -1, "avg": 12.1})
+
+    def test_orders(self):
+        from robot.telegram import order_messages, parse_run
+        log = ("[stop_cancelled] ticker=CNYRUBF, why=trail\n"
+               "[stop_placed] ticker=CNYRUBF, side=1, qty=1, price=12.5\n"
+               "[stop_cancelled] ticker=GLDRUBF, why=orphan stop, no position\n"
+               "[stop_cancelled] ticker=X, why=exit\n")
+        msgs = order_messages(parse_run(log))
+        self.assertEqual(msgs, ["🛡 Стоп передвинут CNYRUBF: покупка 1 по 12.5",
+                                "✖️ Стоп-заявка снята GLDRUBF: orphan stop, no position"])
 
     def test_alerts(self):
         from robot.telegram import build
         self.assertIn("ТРЕБУЕТСЯ ВНИМАНИЕ", build("[error] ticker=X, error=boom\n", self.STATUS, 0, False))
         self.assertIn("кодом 1", build("Traceback ...\n", self.STATUS, 1, False))
         self.assertIn("Статус получить не удалось", build("", None, 0, False))
+        self.assertIn("сделки", build("", self.STATUS, 0, False, problems=["Не удалось получить сделки"]))
         naked = {"slots": [{"ticker": "X", "qty": 1, "avg": 1, "last": 1, "unrealized_rub": 0, "stops": []}]}
         self.assertIn("НЕТ СТОПА", build("", naked, 0, False))
