@@ -1,0 +1,42 @@
+name: Trading robot
+
+on:
+  schedule:
+    # Hourly at :07 on weekdays, 10:07-18:07 Moscow time (UTC+3). GitHub may start runs late.
+    - cron: "7 7-15 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Robot command"
+        type: choice
+        options: [run, status, flatten]
+        default: run
+
+concurrency:
+  group: trading-robot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  robot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TINVEST_TOKEN: ${{ secrets.TINVEST_TOKEN }}
+      ROBOT_LIVE: "yes"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Robot command
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.command != 'run' }}
+        run: python3 -m robot ${{ inputs.command }}
+      - name: Trading pass
+        if: ${{ github.event_name == 'schedule' || inputs.command == 'run' }}
+        run: python3 -m robot run
+      - name: Status
+        if: ${{ always() }}
+        run: python3 -m robot status
