@@ -236,3 +236,30 @@ class EngineTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TelegramTest(unittest.TestCase):
+    STATUS = {"free_money": 4595.21, "slots": [
+        {"ticker": "CNYRUBF", "qty": -1, "avg": 12.449, "last": 12.445, "unrealized_rub": 4.0,
+         "stops": [[1, 1, 12.532]]},
+        {"ticker": "GLDRUBF", "qty": 0, "avg": 0.0, "last": 11149.5, "unrealized_rub": 0.0, "stops": []}]}
+
+    def test_quiet_pass_sends_nothing(self):
+        from robot.telegram import build
+        self.assertIsNone(build("[skip] ticker=X, why=only 3 bars\n", self.STATUS, 0, False))
+
+    def test_activity_and_summary(self):
+        from robot.telegram import build
+        msg = build("[entered] ticker=CNYRUBF, side=-1, qty=1, stop=12.532\n", self.STATUS, 0, False)
+        self.assertIn("Вход: ticker=CNYRUBF", msg)
+        self.assertIn("CNYRUBF: шорт 1 @ 12.449", msg)
+        self.assertIn("стоп 12.532", msg)
+        self.assertIn("Итог дня", build("", self.STATUS, 0, True))
+
+    def test_alerts(self):
+        from robot.telegram import build
+        self.assertIn("ТРЕБУЕТСЯ ВНИМАНИЕ", build("[error] ticker=X, error=boom\n", self.STATUS, 0, False))
+        self.assertIn("кодом 1", build("Traceback ...\n", self.STATUS, 1, False))
+        self.assertIn("Статус получить не удалось", build("", None, 0, False))
+        naked = {"slots": [{"ticker": "X", "qty": 1, "avg": 1, "last": 1, "unrealized_rub": 0, "stops": []}]}
+        self.assertIn("НЕТ СТОПА", build("", naked, 0, False))

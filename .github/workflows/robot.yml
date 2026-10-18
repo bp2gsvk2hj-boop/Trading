@@ -32,11 +32,37 @@ jobs:
         with:
           python-version: "3.12"
       - name: Robot command
+        id: command
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.command != 'run' }}
-        run: python3 -m robot ${{ inputs.command }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 -m robot ${{ inputs.command }} 2>&1 | tee run.log
       - name: Trading pass
+        id: pass
         if: ${{ github.event_name == 'schedule' || inputs.command == 'run' }}
-        run: python3 -m robot run
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 -m robot run 2>&1 | tee run.log
       - name: Status
         if: ${{ always() }}
-        run: python3 -m robot status
+        shell: bash
+        run: python3 -m robot status | tee status.json
+      - name: Telegram
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FAILED: ${{ steps.pass.outcome == 'failure' || steps.command.outcome == 'failure' }}
+        run: |
+          args=(--run run.log --status status.json
+                --url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+          [ "$FAILED" = "true" ] && args+=(--exit-code 1)
+          # Last scheduled pass of the day (18:07 MSK, may start late) and manual runs: always report.
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(date -u +%H)" -ge 15 ]; then
+            args+=(--summary)
+          fi
+          python3 -m robot.telegram "${args[@]}"
