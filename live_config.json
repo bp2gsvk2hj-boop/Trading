@@ -1,0 +1,19 @@
+{
+  "account_id": "2000062287",
+  "instruments": {
+    "Si": {"prefix": "Si", "tick": 1.0, "pv": 1.0},
+    "CR": {"prefix": "CR", "tick": 0.001, "pv": 1000.0}
+  },
+  "params": {
+    "k": 2.0,
+    "lookback": 14,
+    "start_tod": 600,
+    "end_tod": 1415,
+    "checkpoints": [660, 720, 780, 840, 900]
+  },
+  "risk": 0.005,
+  "min_qty": 1,
+  "max_qty": 1,
+  "roll_days": 7,
+  "max_signal_delay_min": 25
+}
