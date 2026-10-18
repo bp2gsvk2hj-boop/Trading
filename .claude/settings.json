@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ROBOT_LIVE=yes python3 -m robot run)",
+      "Bash(ROBOT_LIVE=yes python3 -m robot flatten)",
+      "Bash(python3 -m robot status)",
+      "Bash(python3 -m robot journal:*)",
+      "Bash(python3 -m robot run --dry-run)"
+    ]
+  }
+}
