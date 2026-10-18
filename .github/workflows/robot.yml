@@ -2,8 +2,9 @@ name: Trading robot
 
 on:
   schedule:
-    # Hourly at :07 on weekdays, 10:07-18:07 Moscow time (UTC+3). GitHub may start runs late.
-    - cron: "7 7-15 * * 1-5"
+    # Every 15 min on weekdays, 10:02-18:47 Moscow time (UTC+3), shortly after each 15m/1h bar
+    # closes. GitHub may start runs late.
+    - cron: "2-59/15 7-15 * * 1-5"
   workflow_dispatch:
     inputs:
       command:
@@ -68,8 +69,8 @@ jobs:
           args=(--run run.log --status status.json --trades
                 --url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
           [ "$FAILED" = "true" ] && args+=(--exit-code 1)
-          # Last scheduled pass of the day (18:07 MSK, may start late) and manual runs: always report.
-          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(date -u +%H)" -ge 15 ]; then
+          # Last scheduled pass of the day (18:47 MSK, may start late) and manual runs: always report.
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(date -u +%H%M)" -ge 1545 ]; then
             args+=(--summary)
           fi
           python3 -m robot.telegram "${args[@]}"
