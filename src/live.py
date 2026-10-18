@@ -128,14 +128,47 @@ def decide(name, now, equity):
             "exit_at": "23:40 MSK"}
 
 
+def vb_levels(name, spec, now):
+    """Volatility-breakout levels for today: O +/- k * mean(range of last n days)."""
+    V = CFG["vb"]
+    fut = front_contract(spec["prefix"], now.date())
+    df = candles(fut["uid"], now - timedelta(days=45), now)
+    sess = df[df.tod >= V["anchor_tod"]]
+    today = pd.Timestamp(now.date())
+    g = sess.groupby("date")
+    rng = ((g.high.max() - g.low.min()) / g.open.first())
+    rng = rng[rng.index < today].tail(V["n_range"])
+    d = sess[sess.date == today]
+    out = dict(instrument=name, ticker=fut["ticker"], instrumentId=f"{fut['ticker']}_SPBFUT")
+    if d.empty or d.tod.iloc[0] > V["anchor_tod"] + 5:
+        return {**out, "action": "NONE", "reason": "no 10:00 bar yet"}
+    if len(rng) < V["n_range"]:
+        return {**out, "action": "NONE", "reason": f"history {len(rng)} days"}
+    O = float(d.open.iloc[0]); R = float(rng.mean()) * O; tick = spec["tick"]
+    rnd = lambda x: round(round(x / tick) * tick, 6)
+    up, dn = rnd(O + V["k"] * R), rnd(O - V["k"] * R)
+    hi, lo = float(d.high.max()), float(d.low.min())
+    return {**out, "action": "PLACE", "O": O, "range": round(R, 6), "buy_stop": up, "sell_stop": dn,
+            "protective_stop": rnd(O), "already_hit_up": hi >= up, "already_hit_dn": lo <= dn,
+            "entries_until": "18:00", "exit_at": "23:40"}
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["signal", "contracts"])
+    ap.add_argument("cmd", choices=["signal", "contracts", "vb"])
     ap.add_argument("--equity", type=float, default=0)
     ap.add_argument("--now", default=None)
     a = ap.parse_args()
     now = datetime.fromisoformat(a.now).replace(tzinfo=MSK) if a.now else datetime.now(MSK)
     res = []
+    if a.cmd == "vb":
+        for name, spec in CFG["vb"]["instruments"].items():
+            try:
+                res.append(vb_levels(name, spec, now))
+            except Exception as e:
+                res.append(dict(instrument=name, action="ERROR", error=repr(e)))
+        print(json.dumps(res, ensure_ascii=False, indent=1, default=float))
+        return
     for name in CFG["instruments"]:
         try:
             if a.cmd == "contracts":

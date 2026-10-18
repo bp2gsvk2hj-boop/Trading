@@ -36,3 +36,23 @@ Account: `2000062287`. All times are Moscow time (MSK). Weekdays only.
 - If the 23:40 run fails, the stop order still limits the loss, and the next run must
   flatten any leftover position first.
 - Daily loss limit: if the realized loss on the day exceeds 2% of equity, no new entries.
+
+---
+# Sleeve VB — volatility breakout (Si, CR, Eu, RI, MX, GZ)
+
+Designed for a slow connection: entries and stops are broker-side stop orders, the client only
+reconciles once per hour.
+
+## 10:05 run — place entry orders
+1. `python3 src/live.py vb` → per instrument `buy_stop`, `sell_stop`, `protective_stop` (= 10:00 open O).
+2. qty = floor(equity * risk / (|buy_stop - O| * point value)) (risk = 0.3%), capped by `invest_get_max_lots`.
+3. Place two stop orders (STOP_LOSS, EXCHANGE_ORDER_TYPE_MARKET, GOOD_TILL_DATE today 15:00 UTC = 18:00 MSK):
+   BUY qty at `buy_stop`, SELL qty at `sell_stop`. The opposite order is also a wide stop until reconciliation.
+
+## Hourly reconcile (11:02 … 18:02)
+- If a position exists in the instrument and the opposite entry order is still active, cancel it and place a
+  protective STOP_LOSS at `protective_stop` for the position size (GOOD_TILL_DATE 20:45 UTC).
+- If both entry orders filled (position flat), cancel the remaining stops; done for the day.
+- At 18:02, cancel all unfilled entry orders.
+
+## 23:40 — Exit run (same as for ODM): cancel stops, close all Si/CR/Eu/RI/MX/GZ positions at market.

@@ -16,6 +16,15 @@ SPECS = {
     "NG": dict(tick=0.001, pv=lambda usd: 100.0 * usd),
     "Si": dict(tick=1.0, pv=lambda usd: 1.0),        # quarterly USD/RUB, RUB per 1000 USD
     "CR": dict(tick=0.001, pv=lambda usd: 1000.0),   # quarterly CNY/RUB
+    "MX": dict(tick=25.0, pv=lambda usd: 1.0),       # MOEX index x100
+    "RI": dict(tick=10.0, pv=lambda usd: 0.02 * usd),
+    "Eu": dict(tick=1.0, pv=lambda usd: 1.0),
+    "GD": dict(tick=0.1, pv=lambda usd: usd),         # gold, USD per troy oz, 1 oz
+    "SV": dict(tick=0.01, pv=lambda usd: 10.0 * usd),  # silver, 10 oz
+    "SR": dict(tick=1.0, pv=lambda usd: 1.0),        # SBER, 100 shares
+    "GZ": dict(tick=1.0, pv=lambda usd: 1.0),        # GAZP, 100 shares
+    "NA": dict(tick=1.0, pv=lambda usd: 0.01 * usd),  # Nasdaq 100
+    "SF": dict(tick=0.01, pv=lambda usd: usd),        # SPY
 }
 INSTRUMENTS = list(SPECS)
 COMMISSION = 0.0004   # per side, fraction of notional (broker + exchange, conservative)

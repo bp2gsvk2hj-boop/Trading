@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RAW, DATA = ROOT / "data" / "raw", ROOT / "data"
 URL = "https://invest-public-api.tbank.ru/history-data?instrumentId={}&year={}"
 PERPETUAL = ["IMOEXF", "USDRUBF", "CNYRUBF", "GLDRUBF"]
-MONTHLY = ["BR", "NG", "Si", "CR"]  # front contract chosen by daily volume
+MONTHLY = ["BR", "NG", "Si", "CR", "MX", "RI", "Eu", "GD", "SV", "SR", "GZ", "NA", "SF"]  # front contract chosen by daily volume
 YEARS = [2024, 2025, 2026]
 CTX = ssl.create_default_context(cafile=os.environ.get("CA_BUNDLE"))
 
