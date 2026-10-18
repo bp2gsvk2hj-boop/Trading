@@ -36,6 +36,11 @@ reported to the user explicitly, never just logged.
 
 ## Cloud scheduled runs
 
+`.claude/settings.json` pre-approves exactly these commands, so run them verbatim as a single
+Bash call each — no `cd … &&`, pipes or extra flags, or the approval does not match:
+`ROBOT_LIVE=yes python3 -m robot run`, `ROBOT_LIVE=yes python3 -m robot flatten`,
+`python3 -m robot status`. If a command is still refused, report it; never work around it.
+
 Each scheduled run is a fresh container: `state/` (journal, HALT file) does not survive between
 runs. The broker is the source of truth for positions and stops, so trading is unaffected, but:
 the run report in the session transcript is the journal, and stopping the robot means disabling
