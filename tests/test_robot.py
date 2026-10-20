@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import unittest.mock
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -334,3 +335,72 @@ class SignalsTest(unittest.TestCase):
         self.assertIn("🔴 Закрыть ШОРТ CNYRUBF: 1 000 контр.", msgs[0])
         self.assertIn("+100 000 ₽", msgs[0])        # (12.4 - 12.5) * -1 * 1000 * 1000
         self.assertEqual(book, {})
+class ContinuousTest(unittest.TestCase):
+    def test_panama_adjustment_removes_roll_gap(self):
+        from robot import continuous
+        t0 = datetime(2026, 1, 5, 7, 0, tzinfo=timezone.utc)
+        # two contracts: old trades at 100, new one at 110 (gap +10) and keeps rising
+        old = [bar(t0 + k * H, 100, 100.5, 99.5, 100) for k in range(48)]
+        new = [bar(t0 + k * H, 110 + k * 0.1, 111 + k * 0.1, 109 + k * 0.1, 110 + k * 0.1) for k in range(24 * 40)]
+        futs = [{"basicAsset": "X", "ticker": "XXH6", "uid": "old", "expirationDate": "2026-01-08T00:00:00Z"},
+                {"basicAsset": "X", "ticker": "XXM6", "uid": "new", "expirationDate": "2026-12-01T00:00:00Z"}]
+
+        class C:
+            def call(self, method, body=None):
+                if method == "InstrumentsService/Futures":
+                    return {"instruments": futs}
+                src = old if body["instrumentId"] == "old" else new
+                lo = datetime.fromisoformat(body["from"].replace("Z", "+00:00"))
+                hi = datetime.fromisoformat(body["to"].replace("Z", "+00:00"))
+                return FakeClient([b for b in src if lo <= b.t < hi]).call(method, body)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            orig = continuous.DATA_DIR
+            continuous.DATA_DIR = Path(tmp)
+            try:
+                now = t0 + timedelta(days=30)
+                with unittest.mock.patch.object(continuous, "datetime", wraps=datetime) as dt:
+                    dt.now.return_value = now
+                    bars, rolls, shifts = continuous.build(C(), "X", "XX", "1h", days=30, roll_days=1)
+            finally:
+                continuous.DATA_DIR = orig
+        self.assertEqual(len(rolls), 1)
+        k = next(i for i, b in enumerate(bars) if b.t >= rolls[0])
+        # no jump across the roll: old segment shifted up by the 10-point gap
+        self.assertAlmostEqual(bars[k - 1].c, 110 + (k - 1) * 0.1, delta=0.5)
+        self.assertAlmostEqual(bars[0].c - shifts[0], 100)     # real price recoverable
+        self.assertEqual(shifts[-1], 0.0)                      # newest contract unchanged
+
+
+class RollTest(unittest.TestCase):
+    def test_position_moves_to_new_front_with_shifted_stop(self):
+        from robot import continuous, engine as eng_mod
+        old_i = Instrument("XXZ6", "SPBFUT", "uid-old", "old", "X", 0.01, 1.0, 1, 100.0, 100.0, "2026-12-18")
+        new_i = Instrument("XXH7", "SPBFUT", "uid-new", "new", "X", 0.01, 1.0, 1, 100.0, 100.0, "2027-03-19")
+        futs = [{"ticker": "XXZ6", "uid": "uid-old", "expirationDate": "2026-12-18T00:00:00Z"},
+                {"ticker": "XXH7", "uid": "uid-new", "expirationDate": "2027-03-19T00:00:00Z"}]
+
+        class C(FakeClient):
+            def call(self, method, body=None):
+                if method == "MarketDataService/GetLastPrices":
+                    px = {"uid-old": 100.0, "uid-new": 103.0}
+                    return {"lastPrices": [{"instrumentUid": u, "price": f2q(px[u])} for u in body["instrumentId"]]}
+                return super().call(method, body)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Config(mode="paper", account_id="", state_dir=Path(tmp), risk=RiskConfig(capital_rub=50_000),
+                         sessions=Sessions(), slots=[], path=Path(tmp) / "robot.toml")
+            e = Engine(cfg, client=C([]))
+            e._insts.update({"XXZ6": old_i, "XXH7": new_i})
+            e.broker.s["pos"]["uid-old"] = {"qty": -2, "avg": 101.0, "ticker": "XXZ6"}
+            e.broker.post_stop(old_i, 1, 2, 102.5, "s1")
+            e.c.bars = [bar(NOW, 100, 100, 100, 100)]
+            with unittest.mock.patch.object(continuous, "contracts", return_value=futs), \
+                 unittest.mock.patch.object(e.broker, "_last", side_effect=lambda i: {"uid-old": 100.0, "uid-new": 103.0}[i.uid]):
+                e._roll("X", "XX", new_i, "k", NOW)
+            self.assertEqual(e.broker.holding(old_i).qty, 0)
+            self.assertEqual(e.broker.holding(new_i).qty, -2)
+            self.assertEqual(e.broker.stops(old_i), [])
+            st = e.broker.stops(new_i)
+            self.assertEqual([(s.side, s.qty) for s in st], [(1, 2)])
+            self.assertAlmostEqual(st[0].price, 105.5)     # 102.5 + (103 - 100)

@@ -25,11 +25,11 @@ no_entry = [["13:50", "14:10"]]   # around the intraday clearing
 flatten_at = "18:30"              # intraday strategies only
 weekdays_only = true
 
-# Trend following on hourly bars: 20-bar channel breakout, 3 ATR initial stop,
-# 7-bar trailing channel (was 10: same profit, lower drawdown in backtests).
+# Trend following on hourly bars: 20-bar channel breakout only in the direction of
+# EMA(200), 3 ATR initial stop, 7-bar trailing channel (was 10: same profit, lower
+# drawdown in backtests).
 # Valid for the current schedule (decisions on weekdays 10:00-18:50 MSK only): if the
 # robot also ran in the evening/weekend sessions, 7 bars would hurt GLDRUBF - re-test first.
-# only in the direction of EMA(200).
 # Chosen by backtest: profitable on CNYRUBF for every parameter set tried,
 # in and out of sample; GLDRUBF weaker but positive. See README.md.
 [[slots]]

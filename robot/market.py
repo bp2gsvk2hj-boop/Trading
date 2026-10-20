@@ -83,15 +83,16 @@ def resolve(client: Client, spec: str, roll_days: int = 5, today: datetime | Non
 
     "IMOEXF"     -> that ticker on SPBFUT (perpetuals, or a specific contract)
     "front:GAZP" -> nearest contract on basic asset GAZP expiring > roll_days from now
+    "front:Brent:BR" -> same, only tickers starting with BR (skips the BM mini contracts)
     """
     today = today or datetime.now(timezone.utc)
     if spec.startswith("front:"):
-        asset = spec.split(":", 1)[1]
+        asset, prefix = (spec.split(":")[1:] + [""])[:2]
         futs = client.call("InstrumentsService/Futures", {"instrumentStatus": "INSTRUMENT_STATUS_BASE"})["instruments"]
         cutoff = (today + timedelta(days=roll_days)).strftime("%Y-%m-%d")
         cands = [
             f for f in futs
-            if f.get("basicAsset") == asset and f.get("apiTradeAvailableFlag")
+            if f.get("basicAsset") == asset and f.get("apiTradeAvailableFlag") and f["ticker"].startswith(prefix)
             and f["expirationDate"][:10] > cutoff and not f["expirationDate"].startswith("2099")
         ]
         if not cands:
