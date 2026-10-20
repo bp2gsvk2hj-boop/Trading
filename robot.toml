@@ -26,20 +26,23 @@ flatten_at = "18:30"              # intraday strategies only
 weekdays_only = true
 
 # Trend following on hourly bars: 20-bar channel breakout, 3 ATR initial stop,
-# 10-bar trailing channel, only in the direction of EMA(200).
+# 7-bar trailing channel (was 10: same profit, lower drawdown in backtests).
+# Valid for the current schedule (decisions on weekdays 10:00-18:50 MSK only): if the
+# robot also ran in the evening/weekend sessions, 7 bars would hurt GLDRUBF - re-test first.
+# only in the direction of EMA(200).
 # Chosen by backtest: profitable on CNYRUBF for every parameter set tried,
 # in and out of sample; GLDRUBF weaker but positive. See README.md.
 [[slots]]
 ticker = "CNYRUBF"
 strategy = "trend"
 interval = "1h"
-params = { entry_n = 20, exit_n = 10, stop_atr = 3.0, trend_ema = 200 }
+params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
 
 [[slots]]
 ticker = "GLDRUBF"
 strategy = "trend"
 interval = "1h"
-params = { entry_n = 20, exit_n = 10, stop_atr = 3.0, trend_ema = 200 }
+params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
 
 # Rejected by backtest (lose money after fees on 15m bars), kept for research:
 [[slots]]
