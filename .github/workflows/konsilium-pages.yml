@@ -1,0 +1,33 @@
+name: Publish Konsilium weather app
+
+# Publishes only the konsilium/ folder to GitHub Pages.
+# The trading robot code is not part of the site.
+on:
+  push:
+    branches: [main]
+    paths: ["konsilium/**", ".github/workflows/konsilium-pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: konsilium-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: konsilium
+      - id: deployment
+        uses: actions/deploy-pages@v4
