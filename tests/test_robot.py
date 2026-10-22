@@ -308,6 +308,7 @@ class SignalsTest(unittest.TestCase):
             self.assertIn("🟢 Открыть ЛОНГ TEST", msgs[0])
             self.assertIn("Стоп-лосс: продажа", msgs[0])
             self.assertIn("пробой максимума 20 часов", msgs[0])
+            self.assertRegex(msgs[0], r"Риск до стопа ≈ [\d ]+ ₽, ГО ≈ [\d ]+ ₽")
             entry, qty = book["TEST"]["entry"], book["TEST"]["qty"]
 
             bars += [bar(NOW, 102, 103.5, 101.9, 103.4), bar(NOW + H, 103.4, 104.6, 103.3, 104.5)]

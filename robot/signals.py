@@ -78,7 +78,7 @@ def build_messages(events: list[tuple[str, str]], book: dict, point_value, label
             side, qty, stop = int(f["side"]), int(f["qty"]), float(f["stop"])
             px = float(last_market.get(tk, {}).get("price", 0) or 0)
             m = re.match(r"risk (\d+) RUB, GO (\d+) RUB", f.get("sizing", ""))
-            risk = f"Риск до стопа ≈ {int(m.group(1)):,} ₽, ГО ≈ {int(m.group(2)):,} ₽\n".replace(",", " ") if m else ""
+            risk = f"Риск до стопа ≈ {num(int(m.group(1)))} ₽, ГО ≈ {num(int(m.group(2)))} ₽\n" if m else ""
             out.append(f"{head}\n🟢 Открыть {side_ru(side)} {tk}: {num(qty)} контр. по рынку"
                        + (f" (≈{num(px)})" if px else "") + "\n"
                        f"🛡 Стоп-лосс: {'продажа' if side > 0 else 'покупка'} {num(qty)} по {num(stop)}\n"
