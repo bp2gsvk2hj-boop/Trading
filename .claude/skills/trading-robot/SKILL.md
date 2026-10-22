@@ -18,6 +18,12 @@ Read `README.md` for the strategy rationale and backtest results.
 Any `[error]`, `[warn]`, `closed_outside`, or a position without a stop in `status` must be
 reported to the user explicitly, never just logged.
 
+## Signal-only robot
+
+`robot-signals.toml` runs the same strategy on a virtual 5 million RUB account (paper mode) and
+only sends Telegram signals. When changing strategy settings in `robot.toml`, make the same change
+there. Never switch it to sandbox or live mode.
+
 ## Hard rules
 
 - **Never switch to live trading on your own.** `mode = "live"` and `ROBOT_LIVE=yes` are set only
