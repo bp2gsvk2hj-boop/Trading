@@ -3,7 +3,9 @@
 # Same strategy and risk rules as robot.toml, but in paper mode: a virtual account on real
 # quotes. No order can reach the exchange from this config. Every virtual entry, stop move
 # and exit is sent to Telegram as a trading signal (python -m robot.signals).
-# Keep [risk] (except the size), [sessions] and [[slots]] in sync with robot.toml.
+# Same strategy as robot.toml, tuned for a larger account (see README, "Сигналы Сбер: оптимизация"):
+# risk 1.25% per trade instead of 1%, margin cap 80% instead of 60%, plus USDRUBF.
+# Keep [sessions] and the strategy params of the shared slots in sync with robot.toml.
 
 [robot]
 name = "Торговые сигналы Сбер"
@@ -20,9 +22,9 @@ thread_env = "TELEGRAM_THREAD_ID_SBER"
 
 [risk]
 capital_rub = 5000000       # virtual account size
-risk_per_trade = 0.01       # target loss at the stop, share of capital
+risk_per_trade = 0.0125     # target loss at the stop, share of capital (robot.toml: 0.01)
 max_risk_per_trade = 0.03   # skip the trade if even 1 contract risks more
-max_margin_share = 0.6      # GO of all robot positions <= 60% of capital
+max_margin_share = 0.8      # GO of all positions <= 80% of capital (robot.toml: 0.6)
 max_contracts = 2000        # liquidity cap per trade
 max_stopouts_per_day = 2    # no new entries after 2 stop-loss exits in a day
 fee_rate = 0.0005           # per side; matches the sandbox fill (0.05%). Check your tariff.
@@ -59,6 +61,14 @@ params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
 # (+24.7% vs +17.6% at 1M RUB, same drawdown) and 3-4x the hourly volume. See README.md.
 [[slots]]
 ticker = "front:GAZP:GZ"
+strategy = "trend"
+interval = "1h"
+params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
+
+# US dollar perpetual: adds the best risk-adjusted gain at 5M RUB (profit/drawdown 5.8 -> 7.3).
+# Moves together with CNYRUBF (both are bets on the ruble), so the drawdown grows a little.
+[[slots]]
+ticker = "USDRUBF"
 strategy = "trend"
 interval = "1h"
 params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
