@@ -293,3 +293,43 @@ class TelegramTest(unittest.TestCase):
         self.assertIn("сделки", build("", self.STATUS, 0, False, problems=["Не удалось получить сделки"]))
         naked = {"slots": [{"ticker": "X", "qty": 1, "avg": 1, "last": 1, "unrealized_rub": 0, "stops": []}]}
         self.assertIn("НЕТ СТОПА", build("", naked, 0, False))
+
+
+class SignalsTest(unittest.TestCase):
+    def test_virtual_trades_become_readable_signals(self):
+        from robot.signals import build_messages
+        from robot.telegram import parse_run
+        book = {}
+        pv = lambda t: INST.point_value
+        with tempfile.TemporaryDirectory() as tmp:
+            bars = flat_then_breakout()
+            msgs = build_messages(parse_run("\n".join(make_engine(tmp, bars).run_once(NOW))), book, pv, "счёт 5 млн ₽")
+            self.assertEqual(len(msgs), 1, msgs)
+            self.assertIn("🟢 Открыть ЛОНГ TEST", msgs[0])
+            self.assertIn("Стоп-лосс: продажа", msgs[0])
+            self.assertIn("пробой максимума 20 часов", msgs[0])
+            entry, qty = book["TEST"]["entry"], book["TEST"]["qty"]
+
+            bars += [bar(NOW, 102, 103.5, 101.9, 103.4), bar(NOW + H, 103.4, 104.6, 103.3, 104.5)]
+            msgs = build_messages(parse_run("\n".join(make_engine(tmp, bars).run_once(NOW + 2 * H))), book, pv, "x")
+            self.assertEqual(len(msgs), 1, msgs)
+            self.assertIn("🛡 Передвинуть стоп TEST: продажа", msgs[0])
+            self.assertIn("(было", msgs[0])
+
+            bars.append(bar(NOW + 2 * H, 104.5, 104.5, 95, 96))
+            msgs = build_messages(parse_run("\n".join(make_engine(tmp, bars).run_once(NOW + 3 * H))), book, pv, "x")
+            self.assertIn("⛔ Сработал стоп TEST", msgs[0])
+            self.assertIn(f"вход {entry:g}", msgs[0])
+            # the crash bar is also a breakdown: a new short signal follows
+            self.assertIn("🟢 Открыть ШОРТ TEST", msgs[1])
+            self.assertEqual(book["TEST"]["side"], -1)
+
+    def test_strategy_exit_reports_result(self):
+        from robot.signals import build_messages
+        book = {"CNYRUBF": {"side": -1, "qty": 1000, "entry": 12.5, "stop": 12.6}}
+        ev = [("stop_cancelled", "ticker=CNYRUBF, why=exit"),
+              ("market", "ticker=CNYRUBF, side=1, qty=1000, price=12.4, why=trail stop hit at close")]
+        msgs = build_messages(ev, book, lambda t: 1000.0, "x")
+        self.assertIn("🔴 Закрыть ШОРТ CNYRUBF: 1 000 контр.", msgs[0])
+        self.assertIn("+100 000 ₽", msgs[0])        # (12.4 - 12.5) * -1 * 1000 * 1000
+        self.assertEqual(book, {})

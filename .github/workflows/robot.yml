@@ -80,3 +80,53 @@ jobs:
         with:
           path: state
           key: robot-state-${{ github.run_id }}
+
+  # Signal-only copy for a 5 million RUB account (robot-signals.toml, paper mode):
+  # no orders, only Telegram signals. Its virtual account lives in state-signals/.
+  signals:
+    if: ${{ github.event_name == 'schedule' || inputs.command == 'run' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TINVEST_TOKEN: ${{ secrets.TINVEST_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: state-signals
+          key: robot-signals-state-${{ github.run_id }}
+          restore-keys: robot-signals-state-
+      - name: Signal pass (paper)
+        id: pass
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 -m robot --config robot-signals.toml run 2>&1 | tee run.log
+      - name: Status
+        if: ${{ always() }}
+        shell: bash
+        run: python3 -m robot --config robot-signals.toml status | tee status.json
+      - name: Telegram
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          args=(--config robot-signals.toml --run run.log --status status.json)
+          # last scheduled pass of the day and manual runs: daily summary of the virtual account
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(date -u +%H%M)" -ge 1545 ]; then
+            args+=(--summary)
+          fi
+          python3 -m robot.signals "${args[@]}"
+      - name: Save state
+        if: ${{ always() }}
+        uses: actions/cache/save@v4
+        with:
+          path: state-signals
+          key: robot-signals-state-${{ github.run_id }}
