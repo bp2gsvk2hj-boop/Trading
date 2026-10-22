@@ -22,8 +22,8 @@ reported to the user explicitly, never just logged.
 
 The live robot is «Торговый робот Тбанк» (`robot.toml`); the signal robot is «Торговые сигналы Сбер».
 `robot-signals.toml` runs the same strategy on a virtual 5 million RUB account (paper mode) and
-only sends Telegram signals. When changing strategy settings in `robot.toml`, make the same change
-there. Never switch it to sandbox or live mode.
+only sends Telegram signals. It is tuned for its size (risk 1.25%, margin cap 80%, plus USDRUBF);
+when changing the strategy params or sessions in `robot.toml`, make the same change there. Never switch it to sandbox or live mode.
 
 ## Hard rules
 
