@@ -1,6 +1,7 @@
 """robot.toml loading."""
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -21,6 +22,22 @@ class Slot:
 
 
 @dataclass
+class TelegramCfg:
+    """Names of the environment variables (GitHub secrets) with this robot's Telegram target.
+    Empty ones fall back to the shared TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID."""
+    token_env: str = "TELEGRAM_BOT_TOKEN"
+    chat_env: str = "TELEGRAM_CHAT_ID"
+    thread_env: str = ""        # forum topic id in a group with topics
+
+    def resolve(self) -> tuple[str | None, str | None, str | None]:
+        env = os.environ
+        token = env.get(self.token_env) or env.get("TELEGRAM_BOT_TOKEN")
+        chat = env.get(self.chat_env) or env.get("TELEGRAM_CHAT_ID")
+        thread = env.get(self.thread_env) if self.thread_env else None
+        return token or None, chat or None, thread or None
+
+
+@dataclass
 class Config:
     mode: str
     account_id: str
@@ -29,6 +46,8 @@ class Config:
     sessions: Sessions
     slots: list[Slot]
     path: Path
+    name: str = "Торговый робот"
+    telegram: TelegramCfg = field(default_factory=TelegramCfg)
 
 
 def _pick(cls, d: dict):
@@ -57,4 +76,6 @@ def load(path: str | Path = ROOT / "robot.toml") -> Config:
         sessions=_pick(Sessions, raw.get("sessions", {})),
         slots=[_pick(Slot, s) for s in raw.get("slots", [])],
         path=path,
+        name=str(r.get("name", "Торговый робот")),
+        telegram=_pick(TelegramCfg, raw.get("telegram", {})),
     )

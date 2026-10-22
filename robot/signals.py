@@ -55,7 +55,7 @@ def reason_ru(why: str) -> str:
 def build_messages(events: list[tuple[str, str]], book: dict, point_value, label: str) -> list[str]:
     """events: parsed run log. book: {ticker: {side, qty, entry, stop}} of open virtual positions,
     updated in place. point_value(ticker) -> RUB per 1.0 price point per contract."""
-    head = f"📣 СИГНАЛ · {label}"
+    head = f"📣 {label} · СИГНАЛ"
     out: list[str] = []
     last_market: dict[str, dict] = {}
     trailing: set[str] = set()
@@ -110,7 +110,7 @@ def build_messages(events: list[tuple[str, str]], book: dict, point_value, label
 
 
 def summary(status: dict, capital: float, label: str) -> str:
-    lines = [f"📊 {label}: итог дня"]
+    lines = [f"📊 {label}: итог дня (виртуальный счёт)"]
     unreal = 0.0
     for s in status.get("slots", []):
         if not s.get("enabled", True) or not s.get("qty"):
@@ -123,6 +123,13 @@ def summary(status: dict, capital: float, label: str) -> str:
         lines.append("Открытых позиций нет")
     equity = status.get("free_money", capital) + unreal
     lines.append(f"Виртуальный счёт: {equity:,.0f} ₽ ({rub(equity - capital)} с начала)".replace(",", " "))
+    # Most of the account is idle (margin ~5-15% on average): suggest parking it in a money-market
+    # fund, keeping twice the current margin plus 10% of the account as a buffer for new entries.
+    go_used = sum(abs(s.get("qty", 0)) * s.get("go_per_contract", 0) for s in status.get("slots", []))
+    fund = max(0.0, equity - 2 * go_used - 0.1 * equity)
+    if fund > 0:
+        lines.append(f"💰 В фонде денежного рынка можно держать ≈ {num(round(fund, -3))} ₽ "
+                     f"(запас: двойное ГО {num(round(go_used, -3))} ₽ и 10% счёта)")
     return "\n".join(lines)
 
 
@@ -140,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     if cfg.mode != "paper":
         print("robot.signals is only for paper-mode configs", file=sys.stderr)
         return 2
-    label = f"счёт {cfg.risk.capital_rub / 1e6:g} млн ₽"
+    label = cfg.name
     book_path = cfg.state_dir / "signals.json"
     book = json.loads(book_path.read_text()) if book_path.exists() else {}
     events = parse_run(a.run.read_text() if a.run.exists() else "")
@@ -162,11 +169,13 @@ def main(argv: list[str] | None = None) -> int:
     if not messages:
         print("no signals in this pass")
         return 0
-    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    token, chat, thread = cfg.telegram.resolve()
     for m in messages:
+        if not m.startswith(("📣", "📊")):
+            m = f"📣 {cfg.name}\n{m}"
         print(m, end="\n\n")
         if token and chat:
-            send(token, chat, m)
+            send(token, chat, m, thread)
     if not (token and chat):
         print("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set, not sent", file=sys.stderr)
     return 0

@@ -17,6 +17,7 @@ from pathlib import Path
 from .api import Client, q2f
 from .broker import ApiBroker, Broker, PaperBroker, order_key
 from .config import Config
+from . import continuous
 from .market import INTERVALS, Instrument, fetch_candles, resolve
 from .risk import size
 from .strategies import MSK, Action, Position, make
@@ -137,7 +138,13 @@ class Engine:
         key = f"{slot.ticker}:{slot.strategy}:{slot.interval}"
         sst = self.state["slots"].setdefault(key, {"strategy": {}})
         lookback = bar * (strat.warmup + 20) * 3 + timedelta(days=4)
-        bars = fetch_candles(self.c, inst.uid, slot.interval, now - lookback, now)
+        if slot.ticker.startswith("front:"):
+            asset, prefix = (slot.ticker.split(":")[1:] + [""])[:2]
+            self._roll(asset, prefix, inst, key, now)
+            # back-adjusted across the last roll, like the backtest; the front keeps real prices
+            bars = continuous.recent(self.c, asset, prefix, slot.interval, now - lookback, now)
+        else:
+            bars = fetch_candles(self.c, inst.uid, slot.interval, now - lookback, now)
         if len(bars) <= strat.warmup:
             self.log("skip", ticker=inst.ticker, why=f"only {len(bars)} bars")
             return 0.0
@@ -260,6 +267,40 @@ class Engine:
                      reason=act.reason, sizing=note)
             return qty * inst.go
         return 0.0
+
+    def _roll(self, asset: str, prefix: str, front: Instrument, key: str, now: datetime) -> None:
+        """Move a position left in an older contract of this slot into the current front."""
+        for f in continuous.contracts(self.c, asset, prefix):
+            if f["uid"] == front.uid or f["expirationDate"][:10] < now.strftime("%Y-%m-%d"):
+                continue
+            old = self.inst(f["ticker"])
+            h = self.broker.holding(old)
+            if not h.qty:
+                continue
+            side = (h.qty > 0) - (h.qty < 0)
+            if not (self.market_open(old) and self.market_open(front)):
+                self.log("warn", ticker=old.ticker, why=f"roll to {front.ticker} pending, market closed")
+                continue
+            px = self.c.call("MarketDataService/GetLastPrices", {"instrumentId": [old.uid, front.uid]})["lastPrices"]
+            last = {p["instrumentUid"]: q2f(p["price"]) for p in px}
+            stops = self.broker.stops(old)
+            sst = self.state["slots"].setdefault(key, {"strategy": {}})
+            old_stop = stops[0].price if stops else sst.get("stop")
+            for s in stops:
+                self._cancel(old, s.id, f"roll to {front.ticker}")
+            tag = (self.cfg.account_id or "paper", old.uid, front.uid, "roll", now.strftime("%Y-%m-%d"))
+            self._market(old, -side, abs(h.qty), order_key(*tag, "close"), f"roll to {front.ticker}")
+            self._market(front, side, abs(h.qty), order_key(*tag, "open"), f"roll from {old.ticker}")
+            if old_stop is not None:
+                new_stop = front.round_price(old_stop + last[front.uid] - last[old.uid])
+                try:
+                    self._stop(front, -side, abs(h.qty), new_stop, order_key(*tag, "stop"))
+                except Exception as e:
+                    self.log("error", ticker=front.ticker, error=f"stop after roll failed, closing: {e}")
+                    self._market(front, -side, abs(h.qty), order_key(*tag, "abort"), "stop placement failed")
+                    continue
+                sst["stop"] = new_stop
+            self.log("rolled", frm=old.ticker, to=front.ticker, side=side, qty=abs(h.qty))
 
     # ---- manual controls ---------------------------------------------------
     def flatten(self, why: str = "manual flatten") -> list[str]:

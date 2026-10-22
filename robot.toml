@@ -1,6 +1,7 @@
 # Trading robot configuration. See README.md.
 
 [robot]
+name = "Торговый робот Тбанк"
 # paper   - local simulation on real market data, no orders reach the exchange
 # sandbox - T-Invest sandbox account (run `python -m robot sandbox-init`)
 # live    - real money; also requires ROBOT_LIVE=yes in the environment
@@ -8,12 +9,18 @@ mode = "live"
 account_id = "2000062287"
 state_dir = "state"
 
+[telegram]
+# GitHub secret names. Empty/missing ones fall back to TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.
+token_env = "TELEGRAM_BOT_TOKEN"
+chat_env = "TELEGRAM_CHAT_ID"
+thread_env = "TELEGRAM_THREAD_ID_TBANK"   # topic "Тбанк" if the chat is a group with topics
+
 [risk]
-capital_rub = 5000          # sizing uses min(this, free money + margin in use)
+capital_rub = 1000000       # sizing uses min(this, free money + margin in use)
 risk_per_trade = 0.01       # target loss at the stop, share of capital
 max_risk_per_trade = 0.03   # skip the trade if even 1 contract risks more
 max_margin_share = 0.6      # GO of all robot positions <= 60% of capital
-max_contracts = 5
+max_contracts = 300         # liquidity cap per trade
 max_stopouts_per_day = 2    # no new entries after 2 stop-loss exits in a day
 fee_rate = 0.0005           # per side; matches the sandbox fill (0.05%). Check your tariff.
 slippage_ticks = 1          # backtest / paper only
@@ -25,11 +32,11 @@ no_entry = [["13:50", "14:10"]]   # around the intraday clearing
 flatten_at = "18:30"              # intraday strategies only
 weekdays_only = true
 
-# Trend following on hourly bars: 20-bar channel breakout, 3 ATR initial stop,
-# 7-bar trailing channel (was 10: same profit, lower drawdown in backtests).
+# Trend following on hourly bars: 20-bar channel breakout only in the direction of
+# EMA(200), 3 ATR initial stop, 7-bar trailing channel (was 10: same profit, lower
+# drawdown in backtests).
 # Valid for the current schedule (decisions on weekdays 10:00-18:50 MSK only): if the
 # robot also ran in the evening/weekend sessions, 7 bars would hurt GLDRUBF - re-test first.
-# only in the direction of EMA(200).
 # Chosen by backtest: profitable on CNYRUBF for every parameter set tried,
 # in and out of sample; GLDRUBF weaker but positive. See README.md.
 [[slots]]
@@ -40,6 +47,15 @@ params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
 
 [[slots]]
 ticker = "GLDRUBF"
+strategy = "trend"
+interval = "1h"
+params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
+
+# Gazprom on quarterly futures (GZ): rolls to the next contract 5 days before expiry.
+# Chosen over the perpetual GAZPF: better result over 2 years with fees and roll costs
+# (+24.7% vs +17.6% at 1M RUB, same drawdown) and 3-4x the hourly volume. See README.md.
+[[slots]]
+ticker = "front:GAZP:GZ"
 strategy = "trend"
 interval = "1h"
 params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
