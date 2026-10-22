@@ -164,12 +164,10 @@ def build(run_text: str, status: dict | None, exit_code: int, summary: bool, url
 
 
 # ---- broker access -----------------------------------------------------------
-def fetch_trades(since: datetime, now: datetime) -> list[dict]:
+def fetch_trades(cfg, since: datetime, now: datetime) -> list[dict]:
     from .api import q2f
-    from .config import load
     from .engine import Engine
 
-    cfg = load()
     eng = Engine(cfg, read_only=True)
     insts = {i.uid: i for i in (eng.inst(s.ticker) for s in cfg.slots)}
     fmt = lambda d: d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -196,16 +194,21 @@ def fetch_trades(since: datetime, now: datetime) -> list[dict]:
     return sorted(trades, key=lambda x: x["t"])
 
 
-def send(token: str, chat_id: str, text: str) -> None:
-    data = urllib.parse.urlencode({"chat_id": chat_id, "text": text,
-                                   "disable_web_page_preview": "true"}).encode()
+def send(token: str, chat_id: str, text: str, thread_id: str | None = None) -> None:
+    params = {"chat_id": chat_id, "text": text, "disable_web_page_preview": "true"}
+    if thread_id:
+        params["message_thread_id"] = thread_id
+    data = urllib.parse.urlencode(params).encode()
     req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
     with urllib.request.urlopen(req, timeout=20) as r:
         r.read()
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .config import load
+
     p = argparse.ArgumentParser(prog="robot.telegram")
+    p.add_argument("--config", default=None, help="robot config (default robot.toml)")
     p.add_argument("--run", type=Path, required=True)
     p.add_argument("--status", type=Path, required=True)
     p.add_argument("--exit-code", type=int, default=0)
@@ -214,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--cursor", type=Path, default=Path("state/notify.json"))
     p.add_argument("--url", default="")
     a = p.parse_args(argv)
+    cfg = load(a.config) if a.config else load()
     run_text = a.run.read_text() if a.run.exists() else ""
     try:
         status = json.loads(a.status.read_text())
@@ -230,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
             cur = {}
         since = datetime.fromisoformat(cur["since"]) if "since" in cur else now - timedelta(minutes=70)
         try:
-            trades = fetch_trades(since, now)
+            trades = fetch_trades(cfg, since, now)
             pos = cur.get("pos")
             if pos is None and status is not None:
                 # No cursor yet: rewind the current positions by the trades in the window.
@@ -252,11 +256,12 @@ def main(argv: list[str] | None = None) -> int:
     if not messages:
         print("quiet pass, nothing to send")
         return 0
-    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    token, chat, thread = cfg.telegram.resolve()
     for m in messages:
+        m = f"🏦 {cfg.name}\n{m}"
         print(m, end="\n\n")
         if token and chat:
-            send(token, chat, m)
+            send(token, chat, m, thread)
     if not (token and chat):
         print("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set, not sent", file=sys.stderr)
     return 0

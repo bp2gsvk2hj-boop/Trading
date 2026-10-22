@@ -404,3 +404,17 @@ class RollTest(unittest.TestCase):
             st = e.broker.stops(new_i)
             self.assertEqual([(s.side, s.qty) for s in st], [(1, 2)])
             self.assertAlmostEqual(st[0].price, 105.5)     # 102.5 + (103 - 100)
+
+
+class TelegramTargetTest(unittest.TestCase):
+    def test_own_bot_or_fallback_to_shared(self):
+        from robot.config import TelegramCfg
+        cfg = TelegramCfg("TELEGRAM_BOT_TOKEN_SBER", "TELEGRAM_CHAT_ID_SBER", "TELEGRAM_THREAD_ID_SBER")
+        env = {"TELEGRAM_BOT_TOKEN": "shared", "TELEGRAM_CHAT_ID": "42", "TELEGRAM_BOT_TOKEN_SBER": "",
+               "TELEGRAM_CHAT_ID_SBER": "", "TELEGRAM_THREAD_ID_SBER": ""}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(cfg.resolve(), ("shared", "42", None))      # empty secrets -> shared chat
+        with unittest.mock.patch.dict(os.environ, {**env, "TELEGRAM_BOT_TOKEN_SBER": "sber"}, clear=True):
+            self.assertEqual(cfg.resolve(), ("sber", "42", None))        # own bot, same person
+        with unittest.mock.patch.dict(os.environ, {**env, "TELEGRAM_THREAD_ID_SBER": "7"}, clear=True):
+            self.assertEqual(cfg.resolve(), ("shared", "42", "7"))       # topic in a group

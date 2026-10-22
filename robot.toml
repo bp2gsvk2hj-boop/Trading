@@ -1,12 +1,19 @@
 # Trading robot configuration. See README.md.
 
 [robot]
+name = "Торговый робот Тбанк"
 # paper   - local simulation on real market data, no orders reach the exchange
 # sandbox - T-Invest sandbox account (run `python -m robot sandbox-init`)
 # live    - real money; also requires ROBOT_LIVE=yes in the environment
 mode = "live"
 account_id = "2000062287"
 state_dir = "state"
+
+[telegram]
+# GitHub secret names. Empty/missing ones fall back to TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.
+token_env = "TELEGRAM_BOT_TOKEN"
+chat_env = "TELEGRAM_CHAT_ID"
+thread_env = "TELEGRAM_THREAD_ID_TBANK"   # topic "Тбанк" if the chat is a group with topics
 
 [risk]
 capital_rub = 5000          # sizing uses min(this, free money + margin in use)

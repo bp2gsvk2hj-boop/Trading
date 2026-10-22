@@ -1,4 +1,4 @@
-name: Trading robot
+name: Trading robots (Тбанк + Сбер)
 
 on:
   schedule:
@@ -22,6 +22,7 @@ permissions:
 
 jobs:
   robot:
+    name: Торговый робот Тбанк
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -64,6 +65,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_THREAD_ID_TBANK: ${{ secrets.TELEGRAM_THREAD_ID_TBANK }}
           FAILED: ${{ steps.pass.outcome == 'failure' || steps.command.outcome == 'failure' }}
         run: |
           args=(--run run.log --status status.json --trades
@@ -84,6 +86,7 @@ jobs:
   # Signal-only copy for a 5 million RUB account (robot-signals.toml, paper mode):
   # no orders, only Telegram signals. Its virtual account lives in state-signals/.
   signals:
+    name: Торговые сигналы Сбер
     if: ${{ github.event_name == 'schedule' || inputs.command == 'run' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -117,6 +120,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN_SBER: ${{ secrets.TELEGRAM_BOT_TOKEN_SBER }}
+          TELEGRAM_CHAT_ID_SBER: ${{ secrets.TELEGRAM_CHAT_ID_SBER }}
+          TELEGRAM_THREAD_ID_SBER: ${{ secrets.TELEGRAM_THREAD_ID_SBER }}
         run: |
           args=(--config robot-signals.toml --run run.log --status status.json)
           # last scheduled pass of the day and manual runs: daily summary of the virtual account

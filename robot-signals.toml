@@ -1,4 +1,4 @@
-# Signal-only copy of the robot for a 5 million RUB account. See README.md.
+# «Торговые сигналы Сбер»: signal-only copy of the robot for a 5 million RUB account. See README.md.
 #
 # Same strategy and risk rules as robot.toml, but in paper mode: a virtual account on real
 # quotes. No order can reach the exchange from this config. Every virtual entry, stop move
@@ -6,9 +6,17 @@
 # Keep [risk] (except the size), [sessions] and [[slots]] in sync with robot.toml.
 
 [robot]
+name = "Торговые сигналы Сбер"
 mode = "paper"
 account_id = ""
 state_dir = "state-signals"
+
+[telegram]
+# A separate bot (TELEGRAM_BOT_TOKEN_SBER) or a topic in a group (TELEGRAM_THREAD_ID_SBER).
+# Empty/missing secrets fall back to the shared TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.
+token_env = "TELEGRAM_BOT_TOKEN_SBER"
+chat_env = "TELEGRAM_CHAT_ID_SBER"
+thread_env = "TELEGRAM_THREAD_ID_SBER"
 
 [risk]
 capital_rub = 5000000       # virtual account size
