@@ -54,6 +54,15 @@ strategy = "trend"
 interval = "1h"
 params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
 
+# Gazprom on quarterly futures (GZ): rolls to the next contract 5 days before expiry.
+# Chosen over the perpetual GAZPF: better result over 2 years with fees and roll costs
+# (+24.7% vs +17.6% at 1M RUB, same drawdown) and 3-4x the hourly volume. See README.md.
+[[slots]]
+ticker = "front:GAZP:GZ"
+strategy = "trend"
+interval = "1h"
+params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
+
 # Rejected by backtest (lose money after fees on 15m bars), kept for research:
 [[slots]]
 ticker = "GAZPF"

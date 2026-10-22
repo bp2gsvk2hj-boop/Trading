@@ -335,6 +335,17 @@ class SignalsTest(unittest.TestCase):
         self.assertIn("🔴 Закрыть ШОРТ CNYRUBF: 1 000 контр.", msgs[0])
         self.assertIn("+100 000 ₽", msgs[0])        # (12.4 - 12.5) * -1 * 1000 * 1000
         self.assertEqual(book, {})
+
+    def test_summary_suggests_money_fund(self):
+        from robot.signals import summary
+        st = {"free_money": 5_000_000, "slots": [{"ticker": "CNYRUBF", "qty": -500, "avg": 12.1, "last": 12.0,
+                                                  "unrealized_rub": 50_000, "stops": [[1, 500, 12.2]],
+                                                  "go_per_contract": 1000}]}
+        msg = summary(st, 5_000_000, "Торговые сигналы Сбер")
+        self.assertIn("ШОРТ 500", msg)
+        self.assertIn("+50 000 ₽ с начала", msg)
+        # 5.05M - 2*0.5M margin - 10% = 3.545M
+        self.assertIn("фонде денежного рынка можно держать ≈ 3 545 000 ₽", msg)
 class ContinuousTest(unittest.TestCase):
     def test_panama_adjustment_removes_roll_gap(self):
         from robot import continuous

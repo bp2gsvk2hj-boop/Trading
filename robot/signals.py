@@ -123,6 +123,13 @@ def summary(status: dict, capital: float, label: str) -> str:
         lines.append("Открытых позиций нет")
     equity = status.get("free_money", capital) + unreal
     lines.append(f"Виртуальный счёт: {equity:,.0f} ₽ ({rub(equity - capital)} с начала)".replace(",", " "))
+    # Most of the account is idle (margin ~5-15% on average): suggest parking it in a money-market
+    # fund, keeping twice the current margin plus 10% of the account as a buffer for new entries.
+    go_used = sum(abs(s.get("qty", 0)) * s.get("go_per_contract", 0) for s in status.get("slots", []))
+    fund = max(0.0, equity - 2 * go_used - 0.1 * equity)
+    if fund > 0:
+        lines.append(f"💰 В фонде денежного рынка можно держать ≈ {num(round(fund, -3))} ₽ "
+                     f"(запас: двойное ГО {num(round(go_used, -3))} ₽ и 10% счёта)")
     return "\n".join(lines)
 
 
