@@ -31,7 +31,9 @@ haircut = 0.40
 capital_rub = 1000000       # sizing uses min(this, free money + margin in use)
 risk_per_trade = 0.01       # target loss at the stop, share of capital
 max_risk_per_trade = 0.03   # skip the trade if even 1 contract risks more
-max_margin_share = 0.45     # GO of all positions <= 45% of capital: LQDT counts as 60% of its value
+max_margin_share = 0.6      # GO of all positions <= 60% of capital. LQDT counts as 60% of its value,
+                            # so near the cap there is little spare collateral: the owner keeps ~1M RUB
+                            # outside the account to top up if needed
 max_contracts = 300         # liquidity cap per trade
 max_stopouts_per_day = 2    # no new entries after 2 stop-loss exits in a day
 fee_rate = 0.0004           # per side; actual futures fee on the "Трейдер" tariff (0.04%)
