@@ -22,7 +22,7 @@ max_risk_per_trade = 0.03   # skip the trade if even 1 contract risks more
 max_margin_share = 0.6      # GO of all robot positions <= 60% of capital
 max_contracts = 300         # liquidity cap per trade
 max_stopouts_per_day = 2    # no new entries after 2 stop-loss exits in a day
-fee_rate = 0.0005           # per side; matches the sandbox fill (0.05%). Check your tariff.
+fee_rate = 0.0004           # per side; actual futures fee on the "Трейдер" tariff (0.04%)
 slippage_ticks = 1          # backtest / paper only
 
 [sessions]                  # Moscow time
