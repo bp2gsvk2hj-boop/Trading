@@ -10,10 +10,11 @@ account_id = "2000062287"
 state_dir = "state"
 
 [collateral]
-# Idle cash goes into LQDT (money-market fund, ~key rate), which T-Bank accepts as futures
-# collateral at a 40% risk rate. The robot keeps ~2% of equity in cash for variation margin and
-# fees: it sells LQDT when cash goes negative and buys when cash exceeds 4%. Sizing uses
-# cash + LQDT value as capital.
+# Idle cash goes into LQDT (money-market fund, ~key rate). T-Bank blocks futures GO in rubles:
+# GO not covered by cash is a loan with a daily carry fee (40-700 RUB/day on «Трейдер», every
+# calendar day, ~26%+ a year), so the robot keeps cash = blocked GO + ~2% of equity for
+# variation margin and fees. It sells LQDT when cash < GO (right after an entry, the same pass)
+# and buys when cash exceeds GO + 4%. Sizing uses cash + LQDT value as capital.
 enabled = true
 ticker = "LQDT"
 class_code = "SPBRU"        # LQDT is API-tradeable only on this board

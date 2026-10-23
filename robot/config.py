@@ -27,8 +27,8 @@ class CollateralCfg:
     enabled: bool = False
     ticker: str = "LQDT"
     class_code: str = "SPBRU"      # the API-tradeable board for LQDT at T-Invest
-    cash_target: float = 0.02      # after a rebalance, keep this share of equity in cash
-    cash_max: float = 0.04         # buy the fund when cash exceeds this share (sell when cash < 0)
+    cash_target: float = 0.02      # after a rebalance, keep GO + this share of equity in cash
+    cash_max: float = 0.04         # buy the fund when cash exceeds GO + this share (sell when cash < GO)
     haircut: float = 0.40          # broker risk rate: the fund counts as (1 - haircut) of its value
     fee_rate: float = 0.0005       # fund trade fee, paper/backtest only
 

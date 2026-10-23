@@ -45,6 +45,7 @@ class Broker:
     def free_money(self) -> float: ...
     # money-market fund kept as collateral
     def cash(self) -> float: ...                       # RUB balance, negative if borrowed
+    def blocked_go(self) -> float | None: ...          # RUB blocked as futures margin (GO), None if unknown
     def units(self, uid: str) -> float: ...
     def trade_units(self, uid: str, side: int, qty: int, key: str) -> None: ...
     def stopouts_today(self, insts: list[Instrument], since: datetime) -> int: ...
@@ -125,6 +126,12 @@ class ApiBroker(Broker):
         pf = self.c.call(self._m("OperationsService/GetPortfolio", "SandboxService/GetSandboxPortfolio"),
                          {"accountId": self.acc})
         return sum(q2f(p.get("quantity")) for p in pf.get("positions", [])
+                   if p.get("instrumentType") == "currency" and p.get("ticker", "").startswith("RUB"))
+
+    def blocked_go(self):
+        pf = self.c.call(self._m("OperationsService/GetPortfolio", "SandboxService/GetSandboxPortfolio"),
+                         {"accountId": self.acc})
+        return sum(q2f(p.get("blockedLots")) for p in pf.get("positions", [])
                    if p.get("instrumentType") == "currency" and p.get("ticker", "").startswith("RUB"))
 
     def units(self, uid):
@@ -237,6 +244,9 @@ class PaperBroker(Broker):
 
     def cash(self):
         return self.s["money"]
+
+    def blocked_go(self):
+        return None     # the engine computes GO from its own positions
 
     def units(self, uid):
         return self.s.get("sec", {}).get(uid, 0.0)

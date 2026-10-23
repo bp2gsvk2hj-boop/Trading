@@ -133,9 +133,13 @@ def format_status(status: dict) -> list[str]:
     lines = lines or ["Открытых позиций нет"]
     if "collateral" in status:
         c = status["collateral"]
-        lines.append(f"{c['ticker']}: {c['units']:,.0f} паёв ≈ {c['value']:,.0f} ₽ "
-                     f"(в обеспечение идёт {(1 - c['haircut']) * 100:.0f}%), деньги {status.get('cash', 0):,.0f} ₽"
-                     .replace(",", " "))
+        n = lambda x: f"{x:,.0f}".replace(",", " ")
+        line = f"{c['ticker']}: {n(c['units'])} паёв ≈ {n(c['value'])} ₽, деньги {n(status.get('cash', 0))} ₽"
+        if "go" in status:
+            line += f", ГО {n(status['go'])} ₽"
+            if status["go"] - status.get("cash", 0) > 5000:
+                line += " ⚠️ ГО не покрыто деньгами: плата за перенос"
+        lines.append(line)
     if "free_money" in status:
         lines.append(f"Свободно: {status['free_money']:,.2f} ₽".replace(",", " "))
     return lines

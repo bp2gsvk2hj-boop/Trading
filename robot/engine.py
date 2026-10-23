@@ -158,18 +158,30 @@ class Engine:
         px = q2f(self.c.call("MarketDataService/GetLastPrices", {"instrumentId": [uid]})["lastPrices"][0]["price"])
         return self.broker.cash(), self.broker.units(uid), px
 
+    def _go_in_use(self) -> float:
+        """RUB blocked as futures GO. The broker's figure is what the carry fee is charged on
+        (it is lower than the exchange GO for our risk level); paper falls back to positions x GO."""
+        blocked = self.broker.blocked_go()
+        if blocked is not None:
+            return blocked
+        return sum(abs(self.broker.holding(i).qty) * i.go
+                   for i in (self.inst(s.ticker) for s in self.cfg.slots if s.enabled))
+
     def _rebalance(self, now: datetime) -> None:
-        """Keep ~cash_target of equity in cash and the rest in the fund. Sell the fund when
-        variation margin or fees pushed cash below zero, buy when cash piles up above cash_max."""
+        """Keep the blocked GO plus ~cash_target of equity in cash and the rest in the fund.
+        T-Bank blocks GO in rubles: GO not covered by cash is a loan from the broker with a daily
+        carry fee (free only if repaid the same day), so the fund is sold right after an entry.
+        Sell when cash < GO, buy when cash > GO + cash_max of equity."""
         cc = self.cfg.collateral
         uid = self._fund_uid()
         if isinstance(self.broker, PaperBroker):
             self.broker.fund_fee = cc.fee_rate
         cash, units, px = self._fund_state()
         equity = cash + units * px
-        if px <= 0 or (0 <= cash <= cc.cash_max * equity):
+        go = self._go_in_use()
+        if px <= 0 or (go <= cash <= go + cc.cash_max * equity):
             return
-        amount = cash - cc.cash_target * equity          # > 0: buy the fund, < 0: sell it
+        amount = cash - go - cc.cash_target * equity     # > 0: buy the fund, < 0: sell it
         side = 1 if amount > 0 else -1
         qty = math.floor(amount / px) if side > 0 else min(int(units), math.ceil(-amount / px))
         if qty <= 0:
@@ -186,7 +198,7 @@ class Engine:
             return
         self.broker.trade_units(uid, side, qty, key)
         self.log("collateral", ticker=cc.ticker, action=what, units=qty, price=px, amount=round(qty * px),
-                 cash_before=round(cash))
+                 cash_before=round(cash), go=round(go))
 
     def _slot(self, slot, inst: Instrument, now: datetime, risk, margin: float) -> float:
         if slot.fee_rate is not None:
@@ -385,6 +397,7 @@ class Engine:
         if self.cfg.collateral.enabled:
             cash, units, px = self._fund_state()
             out["cash"] = round(cash, 2)
+            out["go"] = round(self._go_in_use(), 2)
             out["collateral"] = {"ticker": self.cfg.collateral.ticker, "units": units, "price": px,
                                  "value": round(units * px, 2), "haircut": self.cfg.collateral.haircut}
         for slot in self.cfg.slots:
