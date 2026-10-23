@@ -9,12 +9,6 @@ mode = "live"
 account_id = "2000062287"
 state_dir = "state"
 
-[telegram]
-# GitHub secret names. Empty/missing ones fall back to TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.
-token_env = "TELEGRAM_BOT_TOKEN"
-chat_env = "TELEGRAM_CHAT_ID"
-thread_env = "TELEGRAM_THREAD_ID_TBANK"   # topic "Тбанк" if the chat is a group with topics
-
 [collateral]
 # Idle cash goes into LQDT (money-market fund, ~key rate), which T-Bank accepts as futures
 # collateral at a 40% risk rate. The robot keeps ~2% of equity in cash for variation margin and
