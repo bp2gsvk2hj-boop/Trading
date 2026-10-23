@@ -204,10 +204,8 @@ def fetch_trades(cfg, since: datetime, now: datetime) -> list[dict]:
     return sorted(trades, key=lambda x: x["t"])
 
 
-def send(token: str, chat_id: str, text: str, thread_id: str | None = None) -> None:
+def send(token: str, chat_id: str, text: str) -> None:
     params = {"chat_id": chat_id, "text": text, "disable_web_page_preview": "true"}
-    if thread_id:
-        params["message_thread_id"] = thread_id
     data = urllib.parse.urlencode(params).encode()
     req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
     with urllib.request.urlopen(req, timeout=20) as r:
@@ -266,12 +264,11 @@ def main(argv: list[str] | None = None) -> int:
     if not messages:
         print("quiet pass, nothing to send")
         return 0
-    token, chat, thread = cfg.telegram.resolve()
+    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     for m in messages:
-        m = f"🏦 {cfg.name}\n{m}"
         print(m, end="\n\n")
         if token and chat:
-            send(token, chat, m, thread)
+            send(token, chat, m)
     if not (token and chat):
         print("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set, not sent", file=sys.stderr)
     return 0

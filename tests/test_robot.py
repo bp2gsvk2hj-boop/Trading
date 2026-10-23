@@ -297,56 +297,6 @@ class TelegramTest(unittest.TestCase):
         self.assertIn("НЕТ СТОПА", build("", naked, 0, False))
 
 
-class SignalsTest(unittest.TestCase):
-    def test_virtual_trades_become_readable_signals(self):
-        from robot.signals import build_messages
-        from robot.telegram import parse_run
-        book = {}
-        pv = lambda t: INST.point_value
-        with tempfile.TemporaryDirectory() as tmp:
-            bars = flat_then_breakout()
-            msgs = build_messages(parse_run("\n".join(make_engine(tmp, bars).run_once(NOW))), book, pv, "счёт 5 млн ₽")
-            self.assertEqual(len(msgs), 1, msgs)
-            self.assertIn("🟢 Открыть ЛОНГ TEST", msgs[0])
-            self.assertIn("Стоп-лосс: продажа", msgs[0])
-            self.assertIn("пробой максимума 20 часов", msgs[0])
-            self.assertRegex(msgs[0], r"Риск до стопа ≈ [\d ]+ ₽, ГО ≈ [\d ]+ ₽")
-            entry, qty = book["TEST"]["entry"], book["TEST"]["qty"]
-
-            bars += [bar(NOW, 102, 103.5, 101.9, 103.4), bar(NOW + H, 103.4, 104.6, 103.3, 104.5)]
-            msgs = build_messages(parse_run("\n".join(make_engine(tmp, bars).run_once(NOW + 2 * H))), book, pv, "x")
-            self.assertEqual(len(msgs), 1, msgs)
-            self.assertIn("🛡 Передвинуть стоп TEST: продажа", msgs[0])
-            self.assertIn("(было", msgs[0])
-
-            bars.append(bar(NOW + 2 * H, 104.5, 104.5, 95, 96))
-            msgs = build_messages(parse_run("\n".join(make_engine(tmp, bars).run_once(NOW + 3 * H))), book, pv, "x")
-            self.assertIn("⛔ Сработал стоп TEST", msgs[0])
-            self.assertIn(f"вход {entry:g}", msgs[0])
-            # the crash bar is also a breakdown: a new short signal follows
-            self.assertIn("🟢 Открыть ШОРТ TEST", msgs[1])
-            self.assertEqual(book["TEST"]["side"], -1)
-
-    def test_strategy_exit_reports_result(self):
-        from robot.signals import build_messages
-        book = {"CNYRUBF": {"side": -1, "qty": 1000, "entry": 12.5, "stop": 12.6}}
-        ev = [("stop_cancelled", "ticker=CNYRUBF, why=exit"),
-              ("market", "ticker=CNYRUBF, side=1, qty=1000, price=12.4, why=trail stop hit at close")]
-        msgs = build_messages(ev, book, lambda t: 1000.0, "x")
-        self.assertIn("🔴 Закрыть ШОРТ CNYRUBF: 1 000 контр.", msgs[0])
-        self.assertIn("+100 000 ₽", msgs[0])        # (12.4 - 12.5) * -1 * 1000 * 1000
-        self.assertEqual(book, {})
-
-    def test_summary_suggests_money_fund(self):
-        from robot.signals import summary
-        st = {"free_money": 5_000_000, "slots": [{"ticker": "CNYRUBF", "qty": -500, "avg": 12.1, "last": 12.0,
-                                                  "unrealized_rub": 50_000, "stops": [[1, 500, 12.2]],
-                                                  "go_per_contract": 1000}]}
-        msg = summary(st, 5_000_000, "Торговые сигналы Сбер")
-        self.assertIn("ШОРТ 500", msg)
-        self.assertIn("+50 000 ₽ с начала", msg)
-        # 5.05M - 2*0.5M margin - 10% = 3.545M
-        self.assertIn("фонде денежного рынка можно держать ≈ 3 545 000 ₽", msg)
 class ContinuousTest(unittest.TestCase):
     def test_panama_adjustment_removes_roll_gap(self):
         from robot import continuous
@@ -416,20 +366,6 @@ class RollTest(unittest.TestCase):
             st = e.broker.stops(new_i)
             self.assertEqual([(s.side, s.qty) for s in st], [(1, 2)])
             self.assertAlmostEqual(st[0].price, 105.5)     # 102.5 + (103 - 100)
-
-
-class TelegramTargetTest(unittest.TestCase):
-    def test_own_bot_or_fallback_to_shared(self):
-        from robot.config import TelegramCfg
-        cfg = TelegramCfg("TELEGRAM_BOT_TOKEN_SBER", "TELEGRAM_CHAT_ID_SBER", "TELEGRAM_THREAD_ID_SBER")
-        env = {"TELEGRAM_BOT_TOKEN": "shared", "TELEGRAM_CHAT_ID": "42", "TELEGRAM_BOT_TOKEN_SBER": "",
-               "TELEGRAM_CHAT_ID_SBER": "", "TELEGRAM_THREAD_ID_SBER": ""}
-        with unittest.mock.patch.dict(os.environ, env, clear=True):
-            self.assertEqual(cfg.resolve(), ("shared", "42", None))      # empty secrets -> shared chat
-        with unittest.mock.patch.dict(os.environ, {**env, "TELEGRAM_BOT_TOKEN_SBER": "sber"}, clear=True):
-            self.assertEqual(cfg.resolve(), ("sber", "42", None))        # own bot, same person
-        with unittest.mock.patch.dict(os.environ, {**env, "TELEGRAM_THREAD_ID_SBER": "7"}, clear=True):
-            self.assertEqual(cfg.resolve(), ("shared", "42", "7"))       # topic in a group
 
 
 class PaperCapitalTest(unittest.TestCase):

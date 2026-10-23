@@ -18,7 +18,7 @@ class RiskConfig:
     max_contracts: int = 5
     max_stopouts_per_day: int = 2       # no new entries after this many stop-loss exits today
     fee_rate: float = 0.0005            # broker+exchange fee per side, share of contract value
-    fee_per_contract: float = 0.0       # fixed fee per contract per side, RUB (e.g. Sber: 0.5)
+    fee_per_contract: float = 0.0       # fixed fee per contract per side, RUB
     slippage_ticks: int = 1             # per side, in backtests
 
 
