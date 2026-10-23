@@ -19,6 +19,7 @@ class Slot:
     interval: str
     params: dict = field(default_factory=dict)
     enabled: bool = True
+    fee_rate: float | None = None   # instrument-specific exchange fee, overrides [risk].fee_rate
 
 
 @dataclass

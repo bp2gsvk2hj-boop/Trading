@@ -80,8 +80,8 @@ def run(strategy: Strategy, inst: Instrument, bars: list[Candle], risk: RiskConf
 
     def close(price: float, t: datetime, reason: str):
         nonlocal pos, realized
-        pnl = (price - pos.entry) * pos.side * pos.qty * pv - fee(inst, price, pos.qty, risk.fee_rate)
-        entry_fee = fee(inst, pos.entry, pos.qty, risk.fee_rate)
+        pnl = (price - pos.entry) * pos.side * pos.qty * pv - fee(inst, price, pos.qty, risk.fee_rate, risk.fee_per_contract)
+        entry_fee = fee(inst, pos.entry, pos.qty, risk.fee_rate, risk.fee_per_contract)
         realized += pnl
         res.trades.append(Trade(pos.side, pos.qty, pos.entry_time, pos.entry, t, price, pnl - entry_fee, reason))
         pos = Position()
@@ -99,7 +99,7 @@ def run(strategy: Strategy, inst: Instrument, bars: list[Candle], risk: RiskConf
                 qty, _ = size(inst, price, stop, risk)
                 if qty:
                     pos = Position(side, qty, price, stop, b.t, 0)
-                    realized -= fee(inst, price, qty, risk.fee_rate)
+                    realized -= fee(inst, price, qty, risk.fee_rate, risk.fee_per_contract)
         # 2. protective stop inside the bar
         if pos.side == 1 and pos.stop is not None and b.l <= pos.stop:
             close(min(b.o, pos.stop) - slip, b.t, "stop")

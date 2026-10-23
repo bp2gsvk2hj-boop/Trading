@@ -48,7 +48,7 @@ class Engine:
         cfg = self.cfg
         if cfg.mode == "paper":
             return PaperBroker(self.c, cfg.state_dir / "paper.json", cfg.risk.capital_rub,
-                               cfg.risk.slippage_ticks, cfg.risk.fee_rate)
+                               cfg.risk.slippage_ticks, cfg.risk.fee_rate, cfg.risk.fee_per_contract)
         if not cfg.account_id:
             raise ValueError(f"mode={cfg.mode} needs robot.account_id in {cfg.path.name}")
         if cfg.mode == "live" and not self.read_only and os.environ.get(LIVE_ENV) != "yes":
@@ -133,6 +133,10 @@ class Engine:
         return self.notes
 
     def _slot(self, slot, inst: Instrument, now: datetime, risk, margin: float) -> float:
+        if slot.fee_rate is not None:
+            risk = replace(risk, fee_rate=slot.fee_rate)
+            if isinstance(self.broker, PaperBroker):
+                self.broker.fee_rates[inst.uid] = slot.fee_rate
         strat = make(slot.strategy, slot.interval, slot.params)
         bar = INTERVALS[slot.interval][2]
         key = f"{slot.ticker}:{slot.strategy}:{slot.interval}"
