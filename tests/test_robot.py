@@ -1,6 +1,7 @@
 """Offline tests: python -m unittest discover -s tests"""
 from __future__ import annotations
 
+import json
 import os
 import unittest.mock
 import tempfile
@@ -429,3 +430,27 @@ class TelegramTargetTest(unittest.TestCase):
             self.assertEqual(cfg.resolve(), ("sber", "42", None))        # own bot, same person
         with unittest.mock.patch.dict(os.environ, {**env, "TELEGRAM_THREAD_ID_SBER": "7"}, clear=True):
             self.assertEqual(cfg.resolve(), ("shared", "42", "7"))       # topic in a group
+
+
+class PaperCapitalTest(unittest.TestCase):
+    def test_capital_change_is_a_deposit(self):
+        from robot.broker import PaperBroker
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "paper.json"
+            b = PaperBroker(FakeClient([]), path, 5_000_000)
+            b.s["money"] += 12_345           # virtual profit
+            b.s["pos"]["uid"] = {"qty": -3, "avg": 1.0, "ticker": "X"}
+            b.save()
+            b = PaperBroker(FakeClient([]), path, 6_000_000)
+            self.assertEqual(b.free_money(), 6_012_345)
+            self.assertEqual(b.s["pos"]["uid"]["qty"], -3)          # positions kept
+            self.assertEqual(b.s["deposits"][-1]["amount"], 1_000_000)
+            b.save()
+            self.assertEqual(PaperBroker(FakeClient([]), path, 6_000_000).free_money(), 6_012_345)
+
+    def test_legacy_state_without_capital(self):
+        from robot.broker import PaperBroker
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "paper.json"
+            path.write_text(json.dumps({"money": 5_041_000, "pos": {}, "stops": {}, "stopouts": [], "trades": []}))
+            self.assertEqual(PaperBroker(FakeClient([]), path, 6_000_000).free_money(), 6_041_000)

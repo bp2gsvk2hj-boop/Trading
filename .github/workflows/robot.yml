@@ -83,7 +83,7 @@ jobs:
           path: state
           key: robot-state-${{ github.run_id }}
 
-  # Signal-only copy for a 5 million RUB account (robot-signals.toml, paper mode):
+  # Signal-only copy for a 6 million RUB account (robot-signals.toml, paper mode):
   # no orders, only Telegram signals. Its virtual account lives in state-signals/.
   signals:
     name: Торговые сигналы Сбер

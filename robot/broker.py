@@ -139,7 +139,16 @@ class PaperBroker(Broker):
         self.slip_ticks, self.fee_rate = slippage_ticks, fee_rate
         self.clock = lambda: datetime.now(timezone.utc)
         self.s = json.loads(path.read_text()) if path.exists() else {
-            "money": capital, "pos": {}, "stops": {}, "stopouts": [], "trades": []}
+            "money": capital, "capital": capital, "pos": {}, "stops": {}, "stopouts": [], "trades": []}
+        # The configured capital changed: book the difference as a deposit/withdrawal so sizing
+        # follows the new size while open virtual positions and history are kept. States from
+        # before this field existed were created at a round number of millions.
+        prev = self.s.get("capital", round(self.s["money"], -6))
+        if capital != prev:
+            self.s["money"] += capital - prev
+            self.s.setdefault("deposits", []).append(
+                {"t": self.clock().isoformat(), "amount": capital - prev})
+        self.s["capital"] = capital
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
