@@ -122,15 +122,71 @@ class Engine:
         margin = sum(abs(h.qty) * i.go for i, h in zip(insts, holdings.values()))
         day_start = now.astimezone(MSK).replace(hour=0, minute=0, second=0, microsecond=0)
         self.stopouts = self.broker.stopouts_today(insts, day_start)
-        free = self.broker.free_money()
-        risk = replace(self.cfg.risk, capital_rub=min(self.cfg.risk.capital_rub, free + margin))
+        if self.cfg.collateral.enabled:
+            # Capital = cash (incl. variation margin) + the collateral fund at market value.
+            cash, units, px = self._fund_state()
+            capital = cash + units * px
+        else:
+            capital = self.broker.free_money() + margin
+        risk = replace(self.cfg.risk, capital_rub=min(self.cfg.risk.capital_rub, capital))
         for slot, inst in zip(slots, insts):
             try:
                 margin += self._slot(slot, inst, now, risk, margin)
             except Exception as e:  # one bad slot must not stop the others
                 self.log("error", ticker=inst.ticker, error=f"{type(e).__name__}: {e}")
+        if self.cfg.collateral.enabled:
+            try:
+                self._rebalance(now)
+            except Exception as e:
+                self.log("error", ticker=self.cfg.collateral.ticker, error=f"{type(e).__name__}: {e}")
         self.save()
         return self.notes
+
+    # ---- collateral fund (LQDT) ----------------------------------------------
+    def _fund_uid(self) -> str:
+        if not hasattr(self, "_fund"):
+            cc = self.cfg.collateral
+            found = self.c.call("InstrumentsService/FindInstrument", {"query": cc.ticker})["instruments"]
+            match = [i for i in found if i.get("ticker") == cc.ticker and i.get("classCode") == cc.class_code]
+            if not match:
+                raise LookupError(f"{cc.ticker} on {cc.class_code} not found")
+            self._fund = match[0]["uid"]
+        return self._fund
+
+    def _fund_state(self) -> tuple[float, float, float]:
+        uid = self._fund_uid()
+        px = q2f(self.c.call("MarketDataService/GetLastPrices", {"instrumentId": [uid]})["lastPrices"][0]["price"])
+        return self.broker.cash(), self.broker.units(uid), px
+
+    def _rebalance(self, now: datetime) -> None:
+        """Keep ~cash_target of equity in cash and the rest in the fund. Sell the fund when
+        variation margin or fees pushed cash below zero, buy when cash piles up above cash_max."""
+        cc = self.cfg.collateral
+        uid = self._fund_uid()
+        if isinstance(self.broker, PaperBroker):
+            self.broker.fund_fee = cc.fee_rate
+        cash, units, px = self._fund_state()
+        equity = cash + units * px
+        if px <= 0 or (0 <= cash <= cc.cash_max * equity):
+            return
+        amount = cash - cc.cash_target * equity          # > 0: buy the fund, < 0: sell it
+        side = 1 if amount > 0 else -1
+        qty = math.floor(amount / px) if side > 0 else min(int(units), math.ceil(-amount / px))
+        if qty <= 0:
+            return
+        s = self.c.call("MarketDataService/GetTradingStatus", {"instrumentId": uid})
+        if s.get("tradingStatus") != "SECURITY_TRADING_STATUS_NORMAL_TRADING" or not s.get("apiTradeAvailableFlag"):
+            self.log("warn" if cash < 0 else "collateral_wait", ticker=cc.ticker,
+                     why=f"cash {cash:.0f} RUB, fund not tradeable now")
+            return
+        key = order_key(self.cfg.account_id or "paper", uid, "rebalance", now.strftime("%Y-%m-%dT%H:%M"))
+        what = "buy" if side > 0 else "sell"
+        if self.dry:
+            self.log("would_collateral", ticker=cc.ticker, action=what, units=qty, amount=round(qty * px))
+            return
+        self.broker.trade_units(uid, side, qty, key)
+        self.log("collateral", ticker=cc.ticker, action=what, units=qty, price=px, amount=round(qty * px),
+                 cash_before=round(cash))
 
     def _slot(self, slot, inst: Instrument, now: datetime, risk, margin: float) -> float:
         if slot.fee_rate is not None:
@@ -326,6 +382,11 @@ class Engine:
     def status(self) -> dict:
         out = {"mode": self.cfg.mode, "account": self.cfg.account_id or "paper", "halted": self.halted(),
                "free_money": round(self.broker.free_money(), 2), "slots": []}
+        if self.cfg.collateral.enabled:
+            cash, units, px = self._fund_state()
+            out["cash"] = round(cash, 2)
+            out["collateral"] = {"ticker": self.cfg.collateral.ticker, "units": units, "price": px,
+                                 "value": round(units * px, 2), "haircut": self.cfg.collateral.haircut}
         for slot in self.cfg.slots:
             inst = self.inst(slot.ticker)
             h = self.broker.holding(inst)

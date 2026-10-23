@@ -15,11 +15,23 @@ token_env = "TELEGRAM_BOT_TOKEN"
 chat_env = "TELEGRAM_CHAT_ID"
 thread_env = "TELEGRAM_THREAD_ID_TBANK"   # topic "Тбанк" if the chat is a group with topics
 
+[collateral]
+# Idle cash goes into LQDT (money-market fund, ~key rate), which T-Bank accepts as futures
+# collateral at a 40% risk rate. The robot keeps ~2% of equity in cash for variation margin and
+# fees: it sells LQDT when cash goes negative and buys when cash exceeds 4%. Sizing uses
+# cash + LQDT value as capital.
+enabled = true
+ticker = "LQDT"
+class_code = "SPBRU"        # LQDT is API-tradeable only on this board
+cash_target = 0.02
+cash_max = 0.04
+haircut = 0.40
+
 [risk]
 capital_rub = 1000000       # sizing uses min(this, free money + margin in use)
 risk_per_trade = 0.01       # target loss at the stop, share of capital
 max_risk_per_trade = 0.03   # skip the trade if even 1 contract risks more
-max_margin_share = 0.6      # GO of all robot positions <= 60% of capital
+max_margin_share = 0.45     # GO of all positions <= 45% of capital: LQDT counts as 60% of its value
 max_contracts = 300         # liquidity cap per trade
 max_stopouts_per_day = 2    # no new entries after 2 stop-loss exits in a day
 fee_rate = 0.0004           # per side; actual futures fee on the "Трейдер" tariff (0.04%)

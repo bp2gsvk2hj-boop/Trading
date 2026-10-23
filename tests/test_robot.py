@@ -471,3 +471,60 @@ class FeeTest(unittest.TestCase):
             b.fee_rates[INST.uid] = 0.0002
             b.market(INST, 1, 10, "k")                 # 10 contracts at 100 pts x 100 RUB/pt
             self.assertAlmostEqual(1_000_000 - b.free_money(), 100 * 100 * 10 * 0.0002 + 5)
+
+
+class CollateralTest(unittest.TestCase):
+    def _engine(self, tmp, bars):
+        from robot.config import CollateralCfg
+
+        class C(FakeClient):
+            def call(self, method, body=None):
+                if method == "InstrumentsService/FindInstrument":
+                    return {"instruments": [{"ticker": "LQDT", "classCode": "SPBRU", "uid": "fund"}]}
+                return super().call(method, body)
+
+        cfg = Config(mode="paper", account_id="", state_dir=Path(tmp),
+                     risk=RiskConfig(capital_rub=1_000_000, max_risk_per_trade=0.05, max_contracts=10_000),
+                     sessions=Sessions(), slots=[Slot("TEST", "trend", "1h", PARAMS)], path=Path(tmp) / "robot.toml",
+                     collateral=CollateralCfg(enabled=True))
+        e = Engine(cfg, client=C(bars))
+        e._insts["TEST"] = INST
+        return e
+
+    def test_buys_fund_and_sells_it_when_cash_goes_negative(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bars = [bar(NOW - H, 100, 100, 100, 100)]            # fund price 100 in this fake
+            e = self._engine(tmp, bars)
+            e._rebalance(NOW)
+            self.assertEqual(e.broker.units("fund"), 9_800)          # 98% of 1M at 100
+            self.assertAlmostEqual(e.broker.cash(), 1_000_000 - 980_000 - 490)   # 0.05% fee
+            self.assertTrue(any("[collateral] ticker=LQDT, action=buy" in n for n in e.notes), e.notes)
+
+            e.broker.s["money"] = -5_000.0                            # variation margin loss
+            e._rebalance(NOW + timedelta(minutes=15))
+            # equity 975 000 -> keep 2% = 19 500 in cash: sell ceil(24 500 / 100) = 245 units
+            self.assertEqual(e.broker.units("fund"), 9_800 - 245)
+            self.assertGreater(e.broker.cash(), 19_000)
+
+            before = e.broker.units("fund")
+            e._rebalance(NOW + timedelta(minutes=30))                  # cash inside the band: nothing
+            self.assertEqual(e.broker.units("fund"), before)
+
+    def test_sizing_counts_the_fund_as_capital(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bars = flat_then_breakout()
+            e = self._engine(tmp, bars)
+            e.broker.s["money"] = 20_000.0
+            e.broker.s["sec"] = {"fund": 9_800.0}                      # 980 000 RUB in the fund
+            notes = e.run_once(NOW)
+            entered = [n for n in notes if n.startswith("[entered]")]
+            self.assertTrue(entered, notes)
+            # risk 1% of ~1M = 10 000 RUB; with only 20 000 cash it would have been ~200 RUB
+            self.assertIn("risk", entered[0])
+            risk_rub = int(entered[0].split("sizing=risk ")[1].split(" RUB")[0])
+            self.assertGreater(risk_rub, 5_000)
+
+    def test_telegram_reports_fund_trades(self):
+        from robot.telegram import order_messages, parse_run
+        msgs = order_messages(parse_run("[collateral] ticker=LQDT, action=buy, units=463000, price=2.1149, amount=979199, cash_before=1000435\n"))
+        self.assertEqual(msgs, ["💰 LQDT: Куплено 463000 паёв по 2.1149 (≈979 199 ₽) — обеспечение"])

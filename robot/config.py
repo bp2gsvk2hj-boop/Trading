@@ -39,6 +39,18 @@ class TelegramCfg:
 
 
 @dataclass
+class CollateralCfg:
+    """Idle cash kept in a money-market fund that the broker accepts as futures collateral."""
+    enabled: bool = False
+    ticker: str = "LQDT"
+    class_code: str = "SPBRU"      # the API-tradeable board for LQDT at T-Invest
+    cash_target: float = 0.02      # after a rebalance, keep this share of equity in cash
+    cash_max: float = 0.04         # buy the fund when cash exceeds this share (sell when cash < 0)
+    haircut: float = 0.40          # broker risk rate: the fund counts as (1 - haircut) of its value
+    fee_rate: float = 0.0005       # fund trade fee, paper/backtest only
+
+
+@dataclass
 class Config:
     mode: str
     account_id: str
@@ -49,6 +61,7 @@ class Config:
     path: Path
     name: str = "Торговый робот"
     telegram: TelegramCfg = field(default_factory=TelegramCfg)
+    collateral: CollateralCfg = field(default_factory=CollateralCfg)
 
 
 def _pick(cls, d: dict):
@@ -79,4 +92,5 @@ def load(path: str | Path = ROOT / "robot.toml") -> Config:
         path=path,
         name=str(r.get("name", "Торговый робот")),
         telegram=_pick(TelegramCfg, raw.get("telegram", {})),
+        collateral=_pick(CollateralCfg, raw.get("collateral", {})),
     )
