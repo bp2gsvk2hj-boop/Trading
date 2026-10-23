@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import re
 import sys
@@ -19,15 +20,16 @@ from .strategies import STRATEGIES, make
 def cmd_backtest(a, cfg):
     c = Client()
     if a.ticker:
-        slots = [(a.ticker, a.strategy, a.interval, json.loads(a.params) if a.params else {})]
+        slots = [(a.ticker, a.strategy, a.interval, json.loads(a.params) if a.params else {}, None)]
     else:
-        slots = [(s.ticker, s.strategy, s.interval, s.params) for s in cfg.slots if s.enabled]
+        slots = [(s.ticker, s.strategy, s.interval, s.params, s.fee_rate) for s in cfg.slots if s.enabled]
     split = datetime.now(timezone.utc) - timedelta(days=a.test_days)
     total = 0.0
-    for ticker, strat_name, interval, params in slots:
+    for ticker, strat_name, interval, params, fee_rate in slots:
         inst = resolve(c, ticker)
         bars = load_history(c, inst.ticker, interval, a.days, refresh=a.refresh)
-        res = bt.run(make(strat_name, interval, params), inst, bars, cfg.risk, cfg.sessions)
+        risk = cfg.risk if fee_rate is None else replace(cfg.risk, fee_rate=fee_rate)
+        res = bt.run(make(strat_name, interval, params), inst, bars, risk, cfg.sessions)
         full = res.stats(cfg.risk.capital_rub)
         test = res.stats(cfg.risk.capital_rub, since=split)
         total += full["pnl_rub"]

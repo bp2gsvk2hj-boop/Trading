@@ -27,7 +27,11 @@ max_risk_per_trade = 0.03   # skip the trade if even 1 contract risks more
 max_margin_share = 0.8      # GO of all positions <= 80% of capital (robot.toml: 0.6)
 max_contracts = 2000        # liquidity cap per trade
 max_stopouts_per_day = 2    # no new entries after 2 stop-loss exits in a day
-fee_rate = 0.0004           # per side; actual futures fee on the "Трейдер" tariff (0.04%)
+# Sber «Премиальный»: broker 0.5 RUB per contract + MOEX exchange fee (separate, % of contract
+# value, taker). Exchange rates are the higher of the two published versions, to stay conservative:
+# currency 0.00462% (default below), commodity 0.0132% (gold), equity 0.0198% (Gazprom).
+fee_rate = 0.0000462        # exchange fee for currency futures (CNYRUBF, USDRUBF)
+fee_per_contract = 0.5      # broker fee, RUB per contract per side
 slippage_ticks = 1          # backtest / paper only
 
 [sessions]                  # Moscow time
@@ -55,6 +59,7 @@ ticker = "GLDRUBF"
 strategy = "trend"
 interval = "1h"
 params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
+fee_rate = 0.000132         # exchange fee, commodity futures
 
 # Gazprom on quarterly futures (GZ): rolls to the next contract 5 days before expiry.
 # Chosen over the perpetual GAZPF: better result over 2 years with fees and roll costs
@@ -64,6 +69,7 @@ ticker = "front:GAZP:GZ"
 strategy = "trend"
 interval = "1h"
 params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
+fee_rate = 0.000198         # exchange fee, equity futures
 
 # US dollar perpetual: adds the best risk-adjusted gain on a multi-million account (profit/drawdown 5.8 -> 7.3).
 # Moves together with CNYRUBF (both are bets on the ruble), so the drawdown grows a little.

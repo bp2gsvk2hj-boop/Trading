@@ -454,3 +454,20 @@ class PaperCapitalTest(unittest.TestCase):
             path = Path(tmp) / "paper.json"
             path.write_text(json.dumps({"money": 5_041_000, "pos": {}, "stops": {}, "stopouts": [], "trades": []}))
             self.assertEqual(PaperBroker(FakeClient([]), path, 6_000_000).free_money(), 6_041_000)
+
+
+class FeeTest(unittest.TestCase):
+    def test_fixed_plus_percent_fee(self):
+        from robot.risk import fee
+        # 0.5 RUB per contract + 0.00462% of a 12 100 RUB contract, 100 contracts
+        inst = Instrument("CNY", "SPBFUT", "u", "n", "a", 0.001, 1.0, 1, 1000.0, 1000.0, "2099-12-31")  # 1 pt = 1000 RUB
+        self.assertAlmostEqual(fee(inst, 12.1, 100, 0.0000462, 0.5), 12_100 * 100 * 0.0000462 + 50)
+
+    def test_paper_broker_uses_slot_rate_and_fixed_fee(self):
+        from robot.broker import PaperBroker
+        with tempfile.TemporaryDirectory() as tmp:
+            b = PaperBroker(FakeClient([bar(NOW, 100, 100, 100, 100)]), Path(tmp) / "p.json", 1_000_000,
+                            slippage_ticks=0, fee_rate=0.001, fee_per_contract=0.5)
+            b.fee_rates[INST.uid] = 0.0002
+            b.market(INST, 1, 10, "k")                 # 10 contracts at 100 pts x 100 RUB/pt
+            self.assertAlmostEqual(1_000_000 - b.free_money(), 100 * 100 * 10 * 0.0002 + 5)

@@ -134,9 +134,11 @@ class PaperBroker(Broker):
 
     mode = "paper"
 
-    def __init__(self, client: Client, path: Path, capital: float, slippage_ticks: int = 1, fee_rate: float = 0.0005):
+    def __init__(self, client: Client, path: Path, capital: float, slippage_ticks: int = 1, fee_rate: float = 0.0005,
+                 fee_per_contract: float = 0.0):
         self.c, self.path = client, path
-        self.slip_ticks, self.fee_rate = slippage_ticks, fee_rate
+        self.slip_ticks, self.fee_rate, self.fee_per_contract = slippage_ticks, fee_rate, fee_per_contract
+        self.fee_rates: dict[str, float] = {}   # per instrument uid, set by the engine
         self.clock = lambda: datetime.now(timezone.utc)
         self.s = json.loads(path.read_text()) if path.exists() else {
             "money": capital, "capital": capital, "pos": {}, "stops": {}, "stopouts": [], "trades": []}
@@ -161,7 +163,8 @@ class PaperBroker(Broker):
     def _fill(self, inst, side, qty, price, why):
         p = self.s["pos"].get(inst.uid, {"qty": 0, "avg": 0.0})
         q0, q1 = p["qty"], p["qty"] + side * qty
-        fee = abs(price) * inst.point_value * qty * self.fee_rate
+        fee = (abs(price) * inst.point_value * qty * self.fee_rates.get(inst.uid, self.fee_rate)
+               + self.fee_per_contract * qty)
         self.s["money"] -= fee
         if q0 and (q0 > 0) != (side > 0):  # reducing
             closed = min(abs(q0), qty)

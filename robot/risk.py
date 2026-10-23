@@ -18,6 +18,7 @@ class RiskConfig:
     max_contracts: int = 5
     max_stopouts_per_day: int = 2       # no new entries after this many stop-loss exits today
     fee_rate: float = 0.0005            # broker+exchange fee per side, share of contract value
+    fee_per_contract: float = 0.0       # fixed fee per contract per side, RUB (e.g. Sber: 0.5)
     slippage_ticks: int = 1             # per side, in backtests
 
 
@@ -43,13 +44,13 @@ class Sessions:
         return m.time() >= parse_hhmm(self.flatten_at) or m.time() < time(9, 0)
 
 
-def fee(inst: Instrument, price: float, qty: int, rate: float) -> float:
-    return abs(price) * inst.point_value * abs(qty) * rate
+def fee(inst: Instrument, price: float, qty: int, rate: float, per_contract: float = 0.0) -> float:
+    return abs(price) * inst.point_value * abs(qty) * rate + per_contract * abs(qty)
 
 
 def size(inst: Instrument, entry: float, stop: float, cfg: RiskConfig, margin_in_use: float = 0.0) -> tuple[int, str]:
     """Contracts to trade and a note. 0 means skip."""
-    per_contract = abs(entry - stop) * inst.point_value + 2 * fee(inst, entry, 1, cfg.fee_rate)
+    per_contract = abs(entry - stop) * inst.point_value + 2 * fee(inst, entry, 1, cfg.fee_rate, cfg.fee_per_contract)
     if per_contract <= 0:
         return 0, "zero stop distance"
     if per_contract > cfg.capital_rub * cfg.max_risk_per_trade:
