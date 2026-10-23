@@ -43,6 +43,10 @@ class Broker:
     def post_stop(self, inst: Instrument, side: int, qty: int, price: float, key: str) -> str: ...
     def cancel_stop(self, stop_id: str) -> None: ...
     def free_money(self) -> float: ...
+    # money-market fund kept as collateral
+    def cash(self) -> float: ...                       # RUB balance, negative if borrowed
+    def units(self, uid: str) -> float: ...
+    def trade_units(self, uid: str, side: int, qty: int, key: str) -> None: ...
     def stopouts_today(self, insts: list[Instrument], since: datetime) -> int: ...
     def sync(self, inst: Instrument, bars: list[Candle]) -> list[str]:
         """Paper only: simulate stop fills on new bars. Returns event notes."""
@@ -117,6 +121,27 @@ class ApiBroker(Broker):
                         {"accountId": self.acc})
         return sum(q2f(m) for m in r.get("money", []) if m.get("currency") == "rub")
 
+    def cash(self):
+        pf = self.c.call(self._m("OperationsService/GetPortfolio", "SandboxService/GetSandboxPortfolio"),
+                         {"accountId": self.acc})
+        return sum(q2f(p.get("quantity")) for p in pf.get("positions", [])
+                   if p.get("instrumentType") == "currency" and p.get("ticker", "").startswith("RUB"))
+
+    def units(self, uid):
+        pos = self.c.call(self._m("OperationsService/GetPositions", "SandboxService/GetSandboxPositions"),
+                          {"accountId": self.acc})
+        return sum(float(s.get("balance", 0)) for s in pos.get("securities", []) if s.get("instrumentUid") == uid)
+
+    def trade_units(self, uid, side, qty, key):
+        r = self.c.call(self._m("OrdersService/PostOrder", "SandboxService/PostSandboxOrder"), {
+            "instrumentId": uid, "quantity": str(qty), "accountId": self.acc,
+            "direction": "ORDER_DIRECTION_BUY" if side > 0 else "ORDER_DIRECTION_SELL",
+            "orderType": "ORDER_TYPE_MARKET", "orderId": key,
+        })
+        status = r.get("executionReportStatus", "")
+        if status not in ("EXECUTION_REPORT_STATUS_FILL", "EXECUTION_REPORT_STATUS_PARTIALLYFILL", "EXECUTION_REPORT_STATUS_NEW"):
+            raise RuntimeError(f"fund order not filled: {status} {r}")
+
     def stopouts_today(self, insts, since):
         r = self.c.call(self._m("StopOrdersService/GetStopOrders", "SandboxService/GetSandboxStopOrders"), {
             "accountId": self.acc, "status": "STOP_ORDER_STATUS_EXECUTED",
@@ -139,6 +164,7 @@ class PaperBroker(Broker):
         self.c, self.path = client, path
         self.slip_ticks, self.fee_rate, self.fee_per_contract = slippage_ticks, fee_rate, fee_per_contract
         self.fee_rates: dict[str, float] = {}   # per instrument uid, set by the engine
+        self.fund_fee = 0.0005                  # money-market fund trades, set by the engine
         self.clock = lambda: datetime.now(timezone.utc)
         self.s = json.loads(path.read_text()) if path.exists() else {
             "money": capital, "capital": capital, "pos": {}, "stops": {}, "stopouts": [], "trades": []}
@@ -208,6 +234,23 @@ class PaperBroker(Broker):
 
     def free_money(self):
         return self.s["money"]
+
+    def cash(self):
+        return self.s["money"]
+
+    def units(self, uid):
+        return self.s.get("sec", {}).get(uid, 0.0)
+
+    def trade_units(self, uid, side, qty, key):
+        if key in self.s.setdefault("sec_keys", []):
+            return
+        r = self.c.call("MarketDataService/GetLastPrices", {"instrumentId": [uid]})
+        px = q2f(r["lastPrices"][0]["price"])
+        sec = self.s.setdefault("sec", {})
+        sec[uid] = sec.get(uid, 0.0) + side * qty
+        self.s["money"] -= side * qty * px + qty * px * self.fund_fee
+        self.s["sec_keys"].append(key)
+        self.save()
 
     def stopouts_today(self, insts, since):
         uids = {i.uid for i in insts}

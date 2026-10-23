@@ -95,6 +95,11 @@ def order_messages(events: list[tuple[str, str]]) -> list[str]:
     for e, detail in events:
         f = fields(detail)
         tk = f.get("ticker", "?")
+        if e == "collateral":
+            verb = "Куплено" if f.get("action") == "buy" else "Продано"
+            amount = f"{float(f.get('amount', 0)):,.0f}".replace(",", " ")
+            out.append(f"💰 {tk}: {verb} {f.get('units')} паёв по {f.get('price')} (≈{amount} ₽) — обеспечение")
+            continue
         if e == "stop_cancelled":
             if f.get("why") == "trail":
                 pending_trail.add(tk)
@@ -126,6 +131,11 @@ def format_status(status: dict) -> list[str]:
         lines.append(f"{s['ticker']}: {side_ru(s['qty'])} {abs(s['qty'])} @ {s['avg']:g}, "
                      f"сейчас {s['last']:g}, P&L {rub(s['unrealized_rub'])}, стоп {stops}")
     lines = lines or ["Открытых позиций нет"]
+    if "collateral" in status:
+        c = status["collateral"]
+        lines.append(f"{c['ticker']}: {c['units']:,.0f} паёв ≈ {c['value']:,.0f} ₽ "
+                     f"(в обеспечение идёт {(1 - c['haircut']) * 100:.0f}%), деньги {status.get('cash', 0):,.0f} ₽"
+                     .replace(",", " "))
     if "free_money" in status:
         lines.append(f"Свободно: {status['free_money']:,.2f} ₽".replace(",", " "))
     return lines
