@@ -446,6 +446,26 @@ class CollateralTest(unittest.TestCase):
             e._rebalance(NOW + timedelta(minutes=30))                  # cash inside the band: nothing
             self.assertEqual(e.broker.units("fund"), before)
 
+    def test_cash_covers_blocked_go(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            e = self._engine(tmp, [bar(NOW - H, 100, 100, 100, 100)])
+            e.broker.s["money"] = 20_000.0
+            e.broker.s["sec"] = {"fund": 9_800.0}
+            e.broker.blocked_go = lambda: 60_000.0                  # an entry blocked 60 000 RUB of GO
+            e._rebalance(NOW)
+            # equity 1M -> cash = GO 60 000 + 2% = 80 000: sell 600 units
+            self.assertEqual(e.broker.units("fund"), 9_200)
+            self.assertGreaterEqual(e.broker.cash(), 60_000)
+            self.assertTrue(any("action=sell" in n and "go=60000" in n for n in e.notes), e.notes)
+
+            before = e.broker.units("fund")
+            e._rebalance(NOW + timedelta(minutes=15))                # GO covered: nothing
+            self.assertEqual(e.broker.units("fund"), before)
+
+            e.broker.blocked_go = lambda: None                       # position closed, GO released
+            e._rebalance(NOW + timedelta(minutes=30))
+            self.assertLess(e.broker.cash(), 25_000)                 # back to ~2% cash
+
     def test_sizing_counts_the_fund_as_capital(self):
         with tempfile.TemporaryDirectory() as tmp:
             bars = flat_then_breakout()
