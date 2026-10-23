@@ -1,4 +1,4 @@
-# «Торговые сигналы Сбер»: signal-only copy of the robot for a 5 million RUB account. See README.md.
+# «Торговые сигналы Сбер»: signal-only copy of the robot for a 6 million RUB account. See README.md.
 #
 # Same strategy and risk rules as robot.toml, but in paper mode: a virtual account on real
 # quotes. No order can reach the exchange from this config. Every virtual entry, stop move
@@ -21,7 +21,7 @@ chat_env = "TELEGRAM_CHAT_ID_SBER"
 thread_env = "TELEGRAM_THREAD_ID_SBER"
 
 [risk]
-capital_rub = 5000000       # virtual account size
+capital_rub = 6000000       # virtual account size (was 5M; the difference is booked as a deposit)
 risk_per_trade = 0.0125     # target loss at the stop, share of capital (robot.toml: 0.01)
 max_risk_per_trade = 0.03   # skip the trade if even 1 contract risks more
 max_margin_share = 0.8      # GO of all positions <= 80% of capital (robot.toml: 0.6)
@@ -65,7 +65,7 @@ strategy = "trend"
 interval = "1h"
 params = { entry_n = 20, exit_n = 7, stop_atr = 3.0, trend_ema = 200 }
 
-# US dollar perpetual: adds the best risk-adjusted gain at 5M RUB (profit/drawdown 5.8 -> 7.3).
+# US dollar perpetual: adds the best risk-adjusted gain on a multi-million account (profit/drawdown 5.8 -> 7.3).
 # Moves together with CNYRUBF (both are bets on the ruble), so the drawdown grows a little.
 [[slots]]
 ticker = "USDRUBF"
