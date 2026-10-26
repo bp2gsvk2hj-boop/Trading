@@ -136,17 +136,13 @@ textarea{width:100%;min-height:64px;border:1px solid var(--line);border-radius:6
       <label class="fg"><span>Мин. ср. оборот за 5 сессий, млн ₽/день</span><input type="number" id="minTurn" min="0" step="0.5"></label>
       <label class="fg"><span>Мин. сделок за 5 сессий</span><input type="number" id="minTrades" min="0" step="1"></label>
     </div>
-    <div class="frow">
-      <span class="fg"><span>Признаки дефолта:</span></span>
-      <label class="fg"><span>доходность выше медианы 1-го уровня на, п.п.</span><input type="number" id="distGap" min="1" step="1"></label>
-    </div>
   </section>
 
   <div class="tablebox"><table><thead><tr class="head"></tr></thead><tbody id="body"></tbody></table></div>
 
   <section class="panel risk" id="riskPanel">
     <h2 id="riskTitle">На грани дефолта — исключены</h2>
-    <p>Бумага попадает сюда, если у неё на бирже стоит признак дефолта или техдефолта, эмитент есть в стоп-листе (новости и слухи) или доходность к погашению аномально высока. Такие выпуски не входят в подборку, даже если подходят по остальным фильтрам. Кнопка «В таблицу» добавит бумагу вручную, с красной пометкой.</p>
+    <p>Бумага попадает сюда, если у неё на бирже стоит признак дефолта или техдефолта, или эмитент есть в стоп-листе (новости и слухи). Такие выпуски не входят в подборку, даже если подходят по остальным фильтрам. Кнопка «В таблицу» добавит бумагу вручную, с красной пометкой.</p>
     <div class="tablebox"><table><thead><tr class="head"></tr></thead><tbody id="riskBody"></tbody></table></div>
     <details>
       <summary>Стоп-лист эмитентов (дефолты, реструктуризации, негативные новости)</summary>
@@ -186,7 +182,7 @@ const store = {
 };
 let ratings = store.get("bondRatings", {});
 for(const k in ratings){ if(["BBB","BB","B-"].includes(ratings[k])) ratings[k] = "BBB-"; }
-const prefs = Object.assign({horizon:"14", types:["gov","sub","mun","corp"], rgroups:["AAA","AA","A",""], minTurn:1, minTrades:5, distGap:10}, store.get("bondPrefs", {}));
+const prefs = Object.assign({horizon:"14", types:["gov","sub","mun","corp"], rgroups:["AAA","AA","A",""], minTurn:1, minTrades:5}, store.get("bondPrefs", {}));
 let pinned = new Set(store.get("bondPinned", []));
 let stoplist = store.get("bondStoplist", STOP_DEFAULT);
 
@@ -306,7 +302,6 @@ function distress(r, bench){
   const out = [...r.flags];
   const hit = stoplist.find(s => s.trim() && r.text.includes(s.trim().toLowerCase()));
   if(hit) out.push(`стоп-лист: «${hit.trim()}»`);
-  if(bench!=null && r.yld!=null && r.yld > bench + (+prefs.distGap)) out.push(`доходность ${nf(r.yld,1)}% против медианы ${nf(bench,1)}% — рынок закладывает риск невыплаты`);
   return out;
 }
 
@@ -390,13 +385,13 @@ function render(){
     ["Ближайшее погашение", next?fmtD(next.mat):"—", ""],
     ["Риск дефолта, исключено", risk.length, risk.length?"alarm":""]
   ].map(([l,v,c]) => `<div class="kpi ${c}"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
-  $("#stopInfo").textContent = `Исходный список составлен ${STOP_DATE}. Медиана доходности 1-го уровня: ${bench==null?"нет данных":nf(bench,1)+"%"}. Окно до ${fmtD(end)}.`;
+  $("#stopInfo").textContent = `Исходный список составлен ${STOP_DATE}. Окно до ${fmtD(end)}.`;
 }
 function syncControls(){
   $$("#horizon .chip").forEach(b => b.setAttribute("aria-pressed", b.dataset.h===prefs.horizon));
   $$("#types .chip").forEach(b => b.setAttribute("aria-pressed", prefs.types.includes(b.dataset.t)));
   $$("#rgroups .chip").forEach(b => b.setAttribute("aria-pressed", prefs.rgroups.includes(b.dataset.r)));
-  for(const k of ["minTurn","minTrades","distGap"]) if(document.activeElement!==$("#"+k)) $("#"+k).value = prefs[k];
+  for(const k of ["minTurn","minTrades"]) if(document.activeElement!==$("#"+k)) $("#"+k).value = prefs[k];
   if(document.activeElement!==$("#stoplist")) $("#stoplist").value = stoplist.join("\n");
 }
 const savePrefs = () => store.set("bondPrefs", prefs);
@@ -422,7 +417,7 @@ function demoRows(today){
     mk("DEMO4","ДЕМО Город-1","mun",11,99.48,99.30,99.60,[3.1e6,1.4e6,2.2e6,1.8e6,2.5e6],30,18.2,8.1,36.0,2,40.4),
     mk("DEMO5","ДЕМО Ритейл БО-05","corp",13,99.30,99.22,99.38,[28e6,33e6,19e6,24e6,30e6],205,19.6,9.9,44.1,1,49.4),
     mk("DEMO6","ДЕМО Девелопер 001P","corp",22,99.05,98.95,99.15,[12e6,15e6,9e6,11e6,13e6],140,20.4,10.2,46.0,1,51.0),
-    mk("DEMO7","ДЕМО Лизинг 002P","corp",12,94.10,93.80,94.60,[2.4e6,0.8e6,1.9e6,1.1e6,3.0e6],60,95.0,14.5,55.0,3,61.0),
+    mk("DEMO7","ДЕМО Лизинг 002P","corp",12,94.10,93.80,94.60,[2.4e6,0.8e6,1.9e6,1.1e6,3.0e6],60,95.0,14.5,55.0,3,61.0,{flags:["биржа: признак технического дефолта"]}),
     mk("DEMO8","ДЕМО Банк СО-12","corp",10,99.40,99.2,99.6,[4e6,3e6,5e6,2e6,3e6],40,18.0,8.0,30.0,2,32.0,{hard:["структурная облигация"]}),
     mk("DEMO9","ДЕМО Экспорт USD","corp",8,99.6,99.5,99.7,[30e6,22e6,25e6,28e6,26e6],120,6.0,4.0,12.0,1,20.0,{hard:["номинал в долларах"]})
   ];
@@ -444,7 +439,7 @@ document.addEventListener("click", e => {
 document.addEventListener("change", e => {
   if(e.target.classList.contains("rsel")){ const v=e.target.value; if(v) ratings[e.target.dataset.id]=v; else delete ratings[e.target.dataset.id]; store.set("bondRatings", ratings); render(); }
 });
-for(const k of ["minTurn","minTrades","distGap"]) $("#"+k).addEventListener("input", e => { prefs[k] = e.target.value===""?0:+e.target.value; savePrefs(); render(); });
+for(const k of ["minTurn","minTrades"]) $("#"+k).addEventListener("input", e => { prefs[k] = e.target.value===""?0:+e.target.value; savePrefs(); render(); });
 $("#stoplist").addEventListener("input", e => { stoplist = e.target.value.split("\n").map(s=>s.trim()).filter(Boolean); store.set("bondStoplist", stoplist); render(); });
 $("#reload").addEventListener("click", loadAll);
 setInterval(() => { if($("#auto").checked && !state.demo && document.visibilityState==="visible") loadAll(); }, 60000);
