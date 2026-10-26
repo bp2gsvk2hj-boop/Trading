@@ -1,11 +1,11 @@
-name: Publish Konsilium weather app
+name: Publish Pages (Konsilium + bonds)
 
-# Publishes only the konsilium/ folder to GitHub Pages.
+# Publishes konsilium/ at the site root and bonds/ at /bonds/.
 # The trading robot code is not part of the site.
 on:
   push:
     branches: [main]
-    paths: ["konsilium/**", ".github/workflows/konsilium-pages.yml"]
+    paths: ["konsilium/**", "bonds/**", ".github/workflows/konsilium-pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -26,8 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r konsilium/. _site/
+          mkdir -p _site/bonds
+          cp -r bonds/. _site/bonds/
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: konsilium
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
