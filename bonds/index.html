@@ -138,7 +138,6 @@ textarea{width:100%;min-height:64px;border:1px solid var(--line);border-radius:6
     </div>
     <div class="frow">
       <span class="fg"><span>Признаки дефолта:</span></span>
-      <label class="fg"><span>цена ниже, % номинала</span><input type="number" id="distPrice" min="80" max="100" step="0.5"></label>
       <label class="fg"><span>доходность выше медианы 1-го уровня на, п.п.</span><input type="number" id="distGap" min="1" step="1"></label>
     </div>
   </section>
@@ -147,7 +146,7 @@ textarea{width:100%;min-height:64px;border:1px solid var(--line);border-radius:6
 
   <section class="panel risk" id="riskPanel">
     <h2 id="riskTitle">На грани дефолта — исключены</h2>
-    <p>Бумага попадает сюда, если у неё на бирже стоит признак дефолта или техдефолта, эмитент есть в стоп-листе (новости и слухи), цена ниже порога за недели до погашения или доходность аномально высока. Такие выпуски не входят в подборку, даже если подходят по остальным фильтрам. Кнопка «В таблицу» добавит бумагу вручную, с красной пометкой.</p>
+    <p>Бумага попадает сюда, если у неё на бирже стоит признак дефолта или техдефолта, эмитент есть в стоп-листе (новости и слухи) или доходность к погашению аномально высока. Такие выпуски не входят в подборку, даже если подходят по остальным фильтрам. Кнопка «В таблицу» добавит бумагу вручную, с красной пометкой.</p>
     <div class="tablebox"><table><thead><tr class="head"></tr></thead><tbody id="riskBody"></tbody></table></div>
     <details>
       <summary>Стоп-лист эмитентов (дефолты, реструктуризации, негативные новости)</summary>
@@ -187,7 +186,7 @@ const store = {
 };
 let ratings = store.get("bondRatings", {});
 for(const k in ratings){ if(["BBB","BB","B-"].includes(ratings[k])) ratings[k] = "BBB-"; }
-const prefs = Object.assign({horizon:"14", types:["gov","sub","mun","corp"], rgroups:["AAA","AA","A",""], minTurn:1, minTrades:5, distPrice:97, distGap:10}, store.get("bondPrefs", {}));
+const prefs = Object.assign({horizon:"14", types:["gov","sub","mun","corp"], rgroups:["AAA","AA","A",""], minTurn:1, minTrades:5, distGap:10}, store.get("bondPrefs", {}));
 let pinned = new Set(store.get("bondPinned", []));
 let stoplist = store.get("bondStoplist", STOP_DEFAULT);
 
@@ -307,7 +306,6 @@ function distress(r, bench){
   const out = [...r.flags];
   const hit = stoplist.find(s => s.trim() && r.text.includes(s.trim().toLowerCase()));
   if(hit) out.push(`стоп-лист: «${hit.trim()}»`);
-  if(r.price!=null && r.price < prefs.distPrice) out.push(`цена ${nf(r.price,2)}% номинала за ${r.days} дн. до погашения`);
   if(bench!=null && r.yld!=null && r.yld > bench + (+prefs.distGap)) out.push(`доходность ${nf(r.yld,1)}% против медианы ${nf(bench,1)}% — рынок закладывает риск невыплаты`);
   return out;
 }
@@ -398,7 +396,7 @@ function syncControls(){
   $$("#horizon .chip").forEach(b => b.setAttribute("aria-pressed", b.dataset.h===prefs.horizon));
   $$("#types .chip").forEach(b => b.setAttribute("aria-pressed", prefs.types.includes(b.dataset.t)));
   $$("#rgroups .chip").forEach(b => b.setAttribute("aria-pressed", prefs.rgroups.includes(b.dataset.r)));
-  for(const k of ["minTurn","minTrades","distPrice","distGap"]) if(document.activeElement!==$("#"+k)) $("#"+k).value = prefs[k];
+  for(const k of ["minTurn","minTrades","distGap"]) if(document.activeElement!==$("#"+k)) $("#"+k).value = prefs[k];
   if(document.activeElement!==$("#stoplist")) $("#stoplist").value = stoplist.join("\n");
 }
 const savePrefs = () => store.set("bondPrefs", prefs);
@@ -446,7 +444,7 @@ document.addEventListener("click", e => {
 document.addEventListener("change", e => {
   if(e.target.classList.contains("rsel")){ const v=e.target.value; if(v) ratings[e.target.dataset.id]=v; else delete ratings[e.target.dataset.id]; store.set("bondRatings", ratings); render(); }
 });
-for(const k of ["minTurn","minTrades","distPrice","distGap"]) $("#"+k).addEventListener("input", e => { prefs[k] = e.target.value===""?0:+e.target.value; savePrefs(); render(); });
+for(const k of ["minTurn","minTrades","distGap"]) $("#"+k).addEventListener("input", e => { prefs[k] = e.target.value===""?0:+e.target.value; savePrefs(); render(); });
 $("#stoplist").addEventListener("input", e => { stoplist = e.target.value.split("\n").map(s=>s.trim()).filter(Boolean); store.set("bondStoplist", stoplist); render(); });
 $("#reload").addEventListener("click", loadAll);
 setInterval(() => { if($("#auto").checked && !state.demo && document.visibilityState==="visible") loadAll(); }, 60000);
