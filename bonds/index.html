@@ -5,7 +5,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: terminal-style tool — summary strip, filter bar, then one dense scrollable table with a sticky issue column */
+/* Layout: terminal-style tool — summary strip, filter bar, main table, then a red "default risk" panel and the excluded list */
 :root{
   --bg:#f3f5f8; --panel:#ffffff; --fg:#14202e; --muted:#5d6b7c; --line:#dde3ea; --soft:#eaf0f6;
   --accent:#1d4ed8; --accent-soft:#e3ebff;
@@ -25,58 +25,70 @@
   color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.45}
-.wrap{max-width:1320px;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:16px}
+.wrap{max-width:1360px;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:16px}
 header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between}
 h1{font-size:22px;font-weight:600;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-size:15px;font-weight:600;margin:0}
 .sub{color:var(--muted);margin:2px 0 0;font-size:13px}
 .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-button,select,input{font:inherit;color:inherit}
+button,select,input,textarea{font:inherit;color:inherit}
 .btn{background:var(--accent);color:var(--panel);border:0;border-radius:6px;padding:8px 14px;font-weight:500;cursor:pointer}
 .btn:disabled{opacity:.55;cursor:default}
-.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.mini{border:1px solid var(--line);background:var(--panel);border-radius:4px;padding:1px 8px;font-size:12px;cursor:pointer;color:var(--accent)}
+.mini.rm{color:var(--muted)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .stamp{font-family:var(--mono);font-size:12px;color:var(--muted)}
-.banner{border:1px solid var(--warn);background:var(--warn-soft);color:var(--fg);border-radius:8px;padding:10px 14px;font-size:13px}
+.banner{border:1px solid var(--warn);background:var(--warn-soft);border-radius:8px;padding:10px 14px;font-size:13px}
 .banner b{color:var(--warn)}
 .banner.err{border-color:var(--bad);background:var(--bad-soft)}
 .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .kpi{background:var(--panel);padding:10px 14px}
 .kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 .kpi .v{font-family:var(--mono);font-size:20px;font-weight:500;font-variant-numeric:tabular-nums}
-.filters{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+.kpi.alarm .v{color:var(--bad)}
+.filters{display:grid;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.frow{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center}
 .fg{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .fg>span{font-size:12px;color:var(--muted)}
 .chip{border:1px solid var(--line);background:transparent;border-radius:999px;padding:3px 10px;font-size:13px;cursor:pointer}
 .chip[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
-.filters input[type=number]{width:84px;padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);font-family:var(--mono)}
-.filters select{padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg)}
+.filters input[type=number]{width:76px;padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);font-family:var(--mono)}
 .tablebox{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px}
-table{border-collapse:separate;border-spacing:0;width:100%;min-width:1180px;font-variant-numeric:tabular-nums}
+table{border-collapse:separate;border-spacing:0;width:100%;min-width:1220px;font-variant-numeric:tabular-nums}
 th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;vertical-align:middle;white-space:nowrap}
-th{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--soft);cursor:pointer;user-select:none;position:sticky;top:0}
+th{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--soft);cursor:pointer;user-select:none}
 th.sorted{color:var(--accent)}
 th:first-child,td:first-child{text-align:left;position:sticky;left:0;z-index:1;background:var(--panel);border-right:1px solid var(--line)}
 th:first-child{background:var(--soft);z-index:2}
 tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:var(--soft)}
+tr.pinned td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+tr.risk td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
 .num{font-family:var(--mono);font-size:13px}
 .name{font-weight:500}
 .isin{font-family:var(--mono);font-size:11px;color:var(--muted)}
 .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:4px;background:var(--soft);color:var(--muted);margin-left:6px;font-weight:500}
 .tag.gov{background:var(--accent-soft);color:var(--accent)}
+.why{display:block;white-space:normal;max-width:300px;font-size:12px;margin-top:3px;color:var(--warn)}
+.risk .why{color:var(--bad)}
 .pill{display:inline-block;font-family:var(--mono);font-size:12px;padding:1px 7px;border-radius:4px}
 .ok{background:var(--good-soft);color:var(--good)}.mid{background:var(--warn-soft);color:var(--warn)}.hi{background:var(--bad-soft);color:var(--bad)}
 .dim{color:var(--muted)}
 .bars{display:inline-flex;gap:2px;align-items:flex-end;height:18px;margin-right:8px;vertical-align:middle}
-.bars i{display:block;width:6px;background:var(--accent);border-radius:1px;opacity:.85}
+.bars i{display:block;width:5px;background:var(--accent);border-radius:1px;opacity:.85}
 .bars i.z{background:var(--line);height:2px!important}
 .rsel{padding:2px 4px;border:1px solid var(--line);border-radius:4px;background:var(--bg);font-size:12px}
 .days{display:block;font-size:11px;color:var(--muted)}
-.excl{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px}
-.excl summary{cursor:pointer;font-weight:500}
-.excl ul{margin:8px 0 0;padding-left:18px;columns:2 320px;font-size:13px;color:var(--muted)}
-.notes{font-size:12px;color:var(--muted);max-width:90ch;display:grid;gap:4px}
-.empty{padding:28px;text-align:center;color:var(--muted)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;gap:10px}
+.panel.risk{border-color:var(--bad);border-left-width:4px}
+.panel.risk h2{color:var(--bad)}
+.panel summary{cursor:pointer}
+.panel summary h2{display:inline}
+.panel p{margin:0;font-size:13px;color:var(--muted);max-width:95ch}
+.panel .tablebox{border-radius:6px}
+textarea{width:100%;min-height:64px;border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:6px 8px;font-family:var(--mono);font-size:12px}
+.notes{font-size:12px;color:var(--muted);max-width:95ch;display:grid;gap:4px}
+.empty{padding:22px;text-align:center;color:var(--muted);white-space:normal}
 .progress{height:3px;background:var(--line);border-radius:2px;overflow:hidden}
 .progress i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
 @media (prefers-reduced-motion:reduce){.progress i{transition:none}}
@@ -85,8 +97,8 @@ tbody tr:hover td{background:var(--soft)}
 <div class="wrap">
   <header>
     <div>
-      <h1>Погашения облигаций: ближайшие 14 дней</h1>
-      <p class="sub">Гос., субфедеральные, муниципальные и корпоративные выпуски на Мосбирже · данные MOEX ISS</p>
+      <h1 id="h1">Погашения рублёвых облигаций</h1>
+      <p class="sub">Гос., субфедеральные, муниципальные и корпоративные выпуски с номиналом в рублях · данные MOEX ISS</p>
     </div>
     <div class="actions">
       <label class="fg"><input type="checkbox" id="auto" checked> <span>Автообновление 60 с</span></label>
@@ -100,52 +112,100 @@ tbody tr:hover td{background:var(--soft)}
   <section class="summary" id="summary"></section>
 
   <section class="filters" aria-label="Фильтры">
-    <div class="fg"><span>Эмитент</span>
-      <button class="chip" data-t="gov" aria-pressed="true">Гос.</button>
-      <button class="chip" data-t="sub" aria-pressed="true">Субфед.</button>
-      <button class="chip" data-t="mun" aria-pressed="true">Муницип.</button>
-      <button class="chip" data-t="corp" aria-pressed="true">Корп.</button>
+    <div class="frow">
+      <div class="fg" id="horizon"><span>Срок до погашения</span>
+        <button class="chip" data-h="7">1 неделя</button>
+        <button class="chip" data-h="14">2 недели</button>
+        <button class="chip" data-h="m">1 месяц</button>
+      </div>
+      <div class="fg" id="types"><span>Эмитент</span>
+        <button class="chip" data-t="gov">Гос.</button>
+        <button class="chip" data-t="sub">Субфед.</button>
+        <button class="chip" data-t="mun">Муницип.</button>
+        <button class="chip" data-t="corp">Корп.</button>
+      </div>
     </div>
-    <label class="fg"><span>Мин. ср. оборот/день, млн ₽</span><input type="number" id="minTurn" value="1" min="0" step="0.5"></label>
-    <label class="fg"><span>Мин. сделок за 3 дня</span><input type="number" id="minTrades" value="3" min="0" step="1"></label>
-    <label class="fg"><span>Рейтинг</span>
-      <select id="rmode">
-        <option value="hide">Скрыть ниже A, без оценки — показать</option>
-        <option value="strict">Только A и выше</option>
-        <option value="all">Не фильтровать</option>
-      </select>
-    </label>
+    <div class="frow">
+      <div class="fg" id="rgroups"><span>Рейтинг</span>
+        <button class="chip" data-r="AAA">AAA</button>
+        <button class="chip" data-r="AA">AA</button>
+        <button class="chip" data-r="A">A</button>
+        <button class="chip" data-r="BBB-">BBB и ниже</button>
+        <button class="chip" data-r="">Без оценки</button>
+      </div>
+      <label class="fg"><span>Мин. ср. оборот за 5 сессий, млн ₽/день</span><input type="number" id="minTurn" min="0" step="0.5"></label>
+      <label class="fg"><span>Мин. сделок за 5 сессий</span><input type="number" id="minTrades" min="0" step="1"></label>
+    </div>
+    <div class="frow">
+      <span class="fg"><span>Признаки дефолта:</span></span>
+      <label class="fg"><span>цена ниже, % номинала</span><input type="number" id="distPrice" min="80" max="100" step="0.5"></label>
+      <label class="fg"><span>доходность выше медианы 1-го уровня на, п.п.</span><input type="number" id="distGap" min="1" step="1"></label>
+    </div>
   </section>
 
-  <div class="tablebox"><table id="tbl"><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table></div>
+  <div class="tablebox"><table><thead><tr class="head"></tr></thead><tbody id="body"></tbody></table></div>
 
-  <details class="excl" id="excl"><summary id="exclSum">Исключено: 0</summary><ul id="exclList"></ul></details>
+  <section class="panel risk" id="riskPanel">
+    <h2 id="riskTitle">На грани дефолта — исключены</h2>
+    <p>Бумага попадает сюда, если у неё на бирже стоит признак дефолта или техдефолта, эмитент есть в стоп-листе (новости и слухи), цена ниже порога за недели до погашения или доходность аномально высока. Такие выпуски не входят в подборку, даже если подходят по остальным фильтрам. Кнопка «В таблицу» добавит бумагу вручную, с красной пометкой.</p>
+    <div class="tablebox"><table><thead><tr class="head"></tr></thead><tbody id="riskBody"></tbody></table></div>
+    <details>
+      <summary>Стоп-лист эмитентов (дефолты, реструктуризации, негативные новости)</summary>
+      <p style="margin-top:8px">Одно название или его часть на строку. Совпадение ищется в названии выпуска и в описании бумаги на бирже. Список хранится в этом браузере.</p>
+      <textarea id="stoplist" aria-label="Стоп-лист эмитентов"></textarea>
+      <div class="fg"><button class="mini" id="stopReset">Вернуть исходный список</button><span id="stopInfo"></span></div>
+    </details>
+  </section>
+
+  <details class="panel" id="exclPanel">
+    <summary><h2 id="exclTitle">Другие исключённые выпуски</h2></summary>
+    <p>Отсеяны по типу бумаги, валюте номинала, рейтингу или ликвидности. Параметры видны полностью; «В таблицу» добавляет выпуск в подборку.</p>
+    <div class="tablebox"><table><thead><tr class="head"></tr></thead><tbody id="exclBody"></tbody></table></div>
+  </details>
 
   <div class="notes">
-    <div>Оборот за 3 дня — сумма трёх последних завершённых торговых сессий (столбики по дням), без текущей сессии. Спред — (оффер − бид) / середина, в базисных пунктах.</div>
-    <div>Доход до погашения — на 1 облигацию: номинал + последний купон − (цена × номинал + НКД), без комиссий и НДФЛ. % год. — простая доходность к сроку.</div>
-    <div>Кредитные рейтинги MOEX ISS не публикует. ОФЗ помечаются как суверенный AAA, остальным выпускам рейтинг ставится вручную в столбце «Рейтинг» и запоминается в этом браузере. Структурные и субординированные выпуски, выпуски сектора ПИР и с дефолтом исключаются по признакам из описания бумаги.</div>
+    <div>Ср. оборот — среднее за 5 последних завершённых торговых сессий Мосбиржи (столбики по сессиям), без текущей. Спред — (оффер − бид) / середина, в базисных пунктах.</div>
+    <div>Доход до погашения — на 1 облигацию: номинал + последний купон − (оффер × номинал + НКД), без комиссий и НДФЛ.</div>
+    <div>Кредитные рейтинги MOEX ISS не публикует. ОФЗ помечаются как суверенный AAA, остальным выпускам рейтинг ставится в столбце «Рейтинг» и запоминается в этом браузере.</div>
   </div>
 </div>
 
 <script>
 const ISS = "https://iss.moex.com/iss";
-const BOARDS = new Set(["TQOB","TQCB","TQOD","TQOE","TQOY","TQRD"]);
-const RANKS = {"AAA":6,"AA":5,"A":4,"BBB":3,"BB":2,"B-":1};
-const RLABEL = {"":"—","AAA":"AAA","AA":"AA","A":"A","BBB":"BBB","BB":"BB","B-":"B и ниже"};
+const BOARDS = new Set(["TQOB","TQCB","TQOD","TQOE","TQOY","TQRD","TQIR"]);
+const RANKS = {"AAA":4,"AA":3,"A":2,"BBB-":1,"":0};
+const RLABEL = {"":"—","AAA":"AAA","AA":"AA","A":"A","BBB-":"BBB и ниже"};
 const TYPE_LABEL = {gov:"Гос.",sub:"Субфед.",mun:"Муницип.",corp:"Корп."};
+const STOP_DEFAULT = ["Монополия","Финансовые системы","АгроДом","Вератека","Соби-Лизинг","Роял Капитал","ВЗВТ","Эффективные технологии","ЕвроТранс","Продовольствие","ЖКХ РС","Гарант-Инвест"];
+const STOP_DATE = "по публикациям vitvet.com и finance.mail.ru, июль–октябрь 2026";
 const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
 
-let state = {rows:[], excluded:[], demo:false, sort:{key:"days",dir:1}, types:new Set(["gov","sub","mun","corp"]), hist:{}, desc:{}};
-let ratings = {};
-try { ratings = JSON.parse(localStorage.getItem("bondRatings")||"{}"); } catch(e) {}
-function saveRatings(){ try{ localStorage.setItem("bondRatings", JSON.stringify(ratings)); }catch(e){} }
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v==null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+};
+let ratings = store.get("bondRatings", {});
+for(const k in ratings){ if(["BBB","BB","B-"].includes(ratings[k])) ratings[k] = "BBB-"; }
+const prefs = Object.assign({horizon:"14", types:["gov","sub","mun","corp"], rgroups:["AAA","AA","A",""], minTurn:1, minTrades:5, distPrice:97, distGap:10}, store.get("bondPrefs", {}));
+let pinned = new Set(store.get("bondPinned", []));
+let stoplist = store.get("bondStoplist", STOP_DEFAULT);
+
+let state = {rows:[], demo:false, sort:{key:"days",dir:1}, hist:{}, desc:{}, sessions:[]};
 
 const fmtD = d => d ? d.split("-").reverse().join(".") : "—";
 const nf = (v,d=2) => v==null||isNaN(v) ? "—" : v.toLocaleString("ru-RU",{minimumFractionDigits:d,maximumFractionDigits:d});
 const mln = v => v==null ? "—" : (v/1e6).toLocaleString("ru-RU",{maximumFractionDigits: v<1e7?2:1});
 const isoLocal = d => new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
 const dayDiff = (a,b) => Math.round((new Date(b)-new Date(a))/864e5);
+const todayIso = () => isoLocal(new Date());
+function horizonEnd(){
+  const t = new Date();
+  if(prefs.horizon==="m"){ const e = new Date(t); e.setMonth(e.getMonth()+1); return isoLocal(e); }
+  return isoLocal(new Date(t.getTime()+(+prefs.horizon)*864e5));
+}
+const fetchEnd = () => { const e = new Date(); e.setMonth(e.getMonth()+1); return isoLocal(new Date(e.getTime()+864e5)); };
+const HLABEL = {"7":"1 неделя","14":"2 недели","m":"1 месяц"};
 
 async function getJ(url){
   const sep = url.includes("?") ? "&" : "?";
@@ -154,210 +214,243 @@ async function getJ(url){
   return r.json();
 }
 const rowsOf = b => b ? b.data.map(d => Object.fromEntries(b.columns.map((c,i)=>[c,d[i]]))) : [];
-
 async function pool(items, n, fn, onStep){
   let i=0, done=0; const out=[];
   await Promise.all(Array.from({length:n}, async () => {
-    while(i<items.length){ const k=i++; try{ out[k]=await fn(items[k]); }catch(e){ out[k]=null; } onStep && onStep(++done, items.length); }
+    while(i<items.length){ const k=i++; try{ out[k]=await fn(items[k]); }catch(e){ out[k]=null; } onStep && onStep(++done); }
   }));
   return out;
 }
 
 function classify(s){
   const t = ((s.BONDTYPE||"")+" "+(s.BONDSUBTYPE||"")).toLowerCase();
-  if(/офз|государств|федерал(?!ь)/.test(t) || s.SECTYPE==="3" || s.BOARDID==="TQOB") return "gov";
+  if(/офз|государств/.test(t) || s.SECTYPE==="3" || s.BOARDID==="TQOB") return "gov";
   if(/субфед|регион/.test(t) || s.SECTYPE==="5") return "sub";
   if(/муницип/.test(t) || s.SECTYPE==="C") return "mun";
   return "corp";
 }
-const RX_STRUCT = /структур|structur|structured/i;
+const RX_STRUCT = /структур|structur/i;
 const RX_SUB = /суборд|subordin/i;
+const isRub = c => !c || c==="SUR" || c==="RUB";
 
 async function loadAll(){
-  const btn = $("#reload"); btn.disabled = true;
-  setProgress(0.05);
-  const today = isoLocal(new Date());
-  const end = isoLocal(new Date(Date.now()+14*864e5));
+  const btn = $("#reload"); btn.disabled = true; setProgress(0.05);
+  const today = todayIso(), end = fetchEnd();
   try{
-    const secCols = "SECID,BOARDID,SHORTNAME,SECNAME,ISIN,MATDATE,OFFERDATE,FACEVALUE,FACEUNIT,COUPONPERCENT,COUPONVALUE,NEXTCOUPON,ACCRUEDINT,LISTLEVEL,SECTYPE,BONDTYPE,BONDSUBTYPE,PREVWAPRICE,PREVPRICE";
-    const mdCols = "SECID,BOARDID,BID,OFFER,LAST,WAPRICE,MARKETPRICETODAY,LCURRENTPRICE,YIELD,VALTODAY,NUMTRADES,BIDDEPTHT,OFFERDEPTHT,UPDATETIME";
+    const secCols = "SECID,BOARDID,SHORTNAME,SECNAME,ISIN,MATDATE,OFFERDATE,FACEVALUE,FACEUNIT,CURRENCYID,COUPONPERCENT,COUPONVALUE,NEXTCOUPON,ACCRUEDINT,LISTLEVEL,SECTYPE,BONDTYPE,BONDSUBTYPE,PREVWAPRICE,PREVPRICE";
+    const mdCols = "SECID,BOARDID,BID,OFFER,LAST,WAPRICE,MARKETPRICETODAY,LCURRENTPRICE,YIELD,VALTODAY,NUMTRADES,BIDDEPTHT,OFFERDEPTHT";
     const j = await getJ(`${ISS}/engines/stock/markets/bonds/securities.json?iss.only=securities,marketdata&securities.columns=${secCols}&marketdata.columns=${mdCols}`);
     const md = {}; rowsOf(j.marketdata).forEach(m => md[m.SECID+"|"+m.BOARDID] = m);
-    const sec = rowsOf(j.securities).filter(s => s.MATDATE && s.MATDATE>=today && s.MATDATE<=end);
+    const cand = rowsOf(j.securities)
+      .filter(s => s.MATDATE && s.MATDATE>=today && s.MATDATE<=end && BOARDS.has(s.BOARDID))
+      .map(s => ({...s, md: md[s.SECID+"|"+s.BOARDID]||{}, type: classify(s)}));
     setProgress(0.15);
-    const excluded = [], cand = [];
-    for(const s of sec){
-      const label = `${s.SHORTNAME} (${s.SECID})`;
-      if(s.BOARDID==="TQIR"){ excluded.push([label,"сектор ПИР (повышенный риск)"]); continue; }
-      if(!BOARDS.has(s.BOARDID)) continue;
-      const txt = [s.BONDTYPE,s.BONDSUBTYPE,s.SECNAME].join(" ");
-      if(RX_STRUCT.test(txt)){ excluded.push([label,"структурная облигация"]); continue; }
-      if(RX_SUB.test(txt)){ excluded.push([label,"субординированная"]); continue; }
-      cand.push({...s, ...prefix(md[s.SECID+"|"+s.BOARDID]||{}), type:classify(s)});
-    }
-    const from = isoLocal(new Date(Date.now()-12*864e5));
-    const total = cand.length*2 || 1; let step = 0;
-    const tick = () => setProgress(0.15 + 0.85*(++step)/total);
-    const descs = await pool(cand, 6, c => state.desc[c.SECID] ? state.desc[c.SECID] : getJ(`${ISS}/securities/${c.SECID}.json?iss.only=description&description.columns=name,title,value`).then(r => (state.desc[c.SECID]=rowsOf(r.description))), tick);
-    const hists = await pool(cand, 6, c => state.hist[c.SECID+today] ? state.hist[c.SECID+today] : getJ(`${ISS}/history/engines/stock/markets/bonds/boards/${c.BOARDID}/securities/${c.SECID}.json?iss.only=history&from=${from}&history.columns=TRADEDATE,VALUE,NUMTRADES`).then(r => (state.hist[c.SECID+today] = rowsOf(r.history))), tick);
-    const rows = [];
-    cand.forEach((c,i) => {
-      const d = descs[i]||[]; const dm = {}; d.forEach(x => dm[x.name]=x.value);
-      const dtxt = d.map(x => `${x.title} ${x.value}`).join(" ");
-      const label = `${c.SHORTNAME} (${c.SECID})`;
-      if(RX_STRUCT.test(dtxt)){ excluded.push([label,"структурная облигация"]); return; }
-      if(RX_SUB.test(dtxt) || dm.ISSUBORDINATED==="1"){ excluded.push([label,"субординированная"]); return; }
-      if(dm.HASDEFAULT==="1" || dm.HASTECHNICALDEFAULT==="1"){ excluded.push([label,"дефолт / техдефолт"]); return; }
-      const h = (hists[i]||[]).filter(x => x.TRADEDATE<today).sort((a,b)=>a.TRADEDATE<b.TRADEDATE?-1:1).slice(-3);
-      rows.push(build(c, h, dm, today));
-    });
-    state.rows = rows; state.excluded = excluded; state.demo = false;
-    hideBanner();
-    $("#stamp").textContent = `Обновлено ${new Date().toLocaleString("ru-RU")} · окно погашений ${fmtD(today)} – ${fmtD(end)} · найдено ${sec.length}, проверено ${cand.length}`;
+    const from = isoLocal(new Date(Date.now()-21*864e5));
+    let step = 0; const tick = () => setProgress(0.15 + 0.85*(++step)/(cand.length*2||1));
+    const descs = await pool(cand, 6, c => state.desc[c.SECID] || getJ(`${ISS}/securities/${c.SECID}.json?iss.only=description&description.columns=name,title,value`).then(r => (state.desc[c.SECID] = rowsOf(r.description))), tick);
+    const hists = await pool(cand, 6, c => state.hist[c.SECID+today] || getJ(`${ISS}/history/engines/stock/markets/bonds/boards/${c.BOARDID}/securities/${c.SECID}.json?iss.only=history&from=${from}&history.columns=TRADEDATE,VALUE,NUMTRADES`).then(r => (state.hist[c.SECID+today] = rowsOf(r.history))), tick);
+    const dates = new Set(); hists.forEach(h => (h||[]).forEach(x => { if(x.TRADEDATE<today) dates.add(x.TRADEDATE); }));
+    state.sessions = [...dates].sort().slice(-5);
+    state.rows = cand.map((c,i) => build(c, hists[i]||[], descs[i]||[], today));
+    state.demo = false; hideBanner();
+    $("#stamp").textContent = `Обновлено ${new Date().toLocaleString("ru-RU")} · сессии для оборота: ${state.sessions.map(fmtD).join(", ")||"—"} · выпусков с погашением в пределах месяца: ${cand.length}`;
   }catch(e){
     if(!state.rows.length || state.demo){
-      state.rows = demoRows(today); state.excluded = demoExcluded(); state.demo = true;
-      showBanner(`<b>Демо-данные, не рыночные котировки.</b> Из этого окна нет доступа к MOEX ISS (${escapeHtml(e.message||"сетевая ошибка")}). Песочница артефактов Claude блокирует внешние запросы — откройте файл <b>moex-bonds.html</b> в обычном браузере или разместите его на своём веб-сервере, и таблица заполнится живыми данными.`);
-      $("#stamp").textContent = `Демо-режим · окно погашений ${fmtD(today)} – ${fmtD(end)}`;
-    } else {
-      showBanner(`<b>Не удалось обновить:</b> ${escapeHtml(e.message||"сетевая ошибка")}. Показаны данные последнего успешного обновления.`, true);
-    }
+      state.rows = demoRows(today); state.demo = true;
+      showBanner(`<b>Демо-данные, не рыночные котировки.</b> Из этого окна нет доступа к MOEX ISS (${esc(e.message||"сетевая ошибка")}). Откройте приложение по ссылке GitHub Pages в обычном браузере.`);
+      $("#stamp").textContent = "Демо-режим";
+    } else showBanner(`<b>Не удалось обновить:</b> ${esc(e.message||"сетевая ошибка")}. Показаны данные последнего успешного обновления.`, true);
   }
   setProgress(null); btn.disabled = false; render();
 }
-const prefix = m => Object.fromEntries(Object.entries(m).filter(([k])=>k!=="SECID"&&k!=="BOARDID").map(([k,v])=>["m_"+k,v]));
 
-function build(c, h, dm, today){
-  const price = c.m_LAST ?? c.m_LCURRENTPRICE ?? c.m_MARKETPRICETODAY ?? c.m_WAPRICE ?? c.PREVWAPRICE ?? c.PREVPRICE ?? null;
-  const priceSrc = c.m_LAST!=null ? "посл. сделка" : (c.m_LCURRENTPRICE!=null||c.m_MARKETPRICETODAY!=null) ? "текущая оценка" : "вчерашняя средневзв.";
-  const bid = c.m_BID||null, offer = c.m_OFFER||null;
-  const spread = bid&&offer ? (offer-bid)/((offer+bid)/2)*1e4 : null;
-  const days = dayDiff(today, c.MATDATE);
-  const face = c.FACEVALUE||null;
+function build(c, h, d, today){
+  const m = c.md, dm = {}; d.forEach(x => dm[x.name] = x.value);
+  const dtxt = [c.SHORTNAME, c.SECNAME, ...d.map(x => `${x.title} ${x.value}`)].join(" ");
+  const hard = [], flags = [];
+  if(!isRub(c.FACEUNIT)) hard.push(`номинал в ${c.FACEUNIT==="USD"?"долларах":c.FACEUNIT==="EUR"?"евро":c.FACEUNIT==="CNY"?"юанях":c.FACEUNIT}`);
+  if(c.BOARDID==="TQIR") hard.push("сектор ПИР (повышенный риск)");
+  if(RX_STRUCT.test([c.BONDTYPE,c.BONDSUBTYPE,dtxt].join(" "))) hard.push("структурная облигация");
+  if(RX_SUB.test([c.BONDTYPE,c.BONDSUBTYPE,dtxt].join(" ")) || dm.ISSUBORDINATED==="1") hard.push("субординированная");
+  if(dm.HASDEFAULT==="1") flags.push("биржа: признак дефолта эмитента");
+  if(dm.HASTECHNICALDEFAULT==="1") flags.push("биржа: признак технического дефолта");
+  const price = m.LAST ?? m.LCURRENTPRICE ?? m.MARKETPRICETODAY ?? m.WAPRICE ?? c.PREVWAPRICE ?? c.PREVPRICE ?? null;
+  const priceSrc = m.LAST!=null ? "посл. сделка" : (m.LCURRENTPRICE!=null||m.MARKETPRICETODAY!=null) ? "текущая оценка" : "вчерашняя средневзв.";
+  const bid = m.BID||null, offer = m.OFFER||null;
+  const days = dayDiff(today, c.MATDATE), face = c.FACEVALUE||null;
   const lastCpn = c.NEXTCOUPON && c.NEXTCOUPON<=c.MATDATE ? (c.COUPONVALUE||0) : 0;
-  const buyPx = offer ?? price;
-  let income=null, incomePa=null;
-  if(face && buyPx!=null){
-    const cost = buyPx/100*face + (c.ACCRUEDINT||0);
-    income = face + lastCpn - cost;
-    incomePa = days>0 ? income/cost*365/days*100 : null;
-  }
-  const turn = h.map(x=>x.VALUE||0), trades = h.map(x=>x.NUMTRADES||0);
+  const buyPx = offer ?? price; let income=null, incomePa=null;
+  if(face && buyPx!=null){ const cost = buyPx/100*face + (c.ACCRUEDINT||0); income = face + lastCpn - cost; incomePa = days>0 ? income/cost*365/days*100 : null; }
+  const byDate = {}; h.forEach(x => byDate[x.TRADEDATE] = x);
   return {
-    id:c.SECID, board:c.BOARDID, name:c.SHORTNAME, isin:c.ISIN, type:c.type, issuer: dm.EMITENT_TITLE||dm.EMITTER_TITLE||"",
-    mat:c.MATDATE, days, offerDate:c.OFFERDATE, price, priceSrc, bid, offer, spread,
-    yld:c.m_YIELD||null, cpn:c.COUPONPERCENT, nkd:c.ACCRUEDINT, face, cur:c.FACEUNIT, income, incomePa,
-    turnDays:h.map(x=>x.TRADEDATE), turn, turn3:turn.reduce((a,b)=>a+b,0), trades3:trades.reduce((a,b)=>a+b,0),
-    today:c.m_VALTODAY||0, list:c.LISTLEVEL, qual: dm.ISQUALIFIEDINVESTORS==="1",
-    depth:[c.m_BIDDEPTHT,c.m_OFFERDEPTHT]
+    id:c.SECID, board:c.BOARDID, name:c.SHORTNAME, isin:c.ISIN, type:c.type, text:dtxt.toLowerCase(),
+    mat:c.MATDATE, days, offerDate:c.OFFERDATE, price, priceSrc, bid, offer,
+    spread: bid&&offer ? (offer-bid)/((offer+bid)/2)*1e4 : null,
+    yld:m.YIELD||null, cpn:c.COUPONPERCENT, nkd:c.ACCRUEDINT, face, cur:c.FACEUNIT, income, incomePa,
+    byDate, today:m.VALTODAY||0, list:c.LISTLEVEL, qual: dm.ISQUALIFIEDINVESTORS==="1",
+    depth:[m.BIDDEPTHT,m.OFFERDEPTHT], hard, flags
   };
 }
+function liq(r){
+  const turn = state.sessions.map(d => r.byDate[d]?.VALUE||0);
+  const trades = state.sessions.map(d => r.byDate[d]?.NUMTRADES||0);
+  const n = state.sessions.length || 5;
+  return {turn, avg: turn.reduce((a,b)=>a+b,0)/n, trades: trades.reduce((a,b)=>a+b,0)};
+}
+const ratingOf = r => ratings[r.id]!=null ? ratings[r.id] : (r.type==="gov" ? "AAA" : "");
 
-function ratingOf(r){ if(ratings[r.id]!=null) return ratings[r.id]; return r.type==="gov" ? "AAA" : ""; }
+function benchmark(rows){
+  const y = rows.filter(r => r.list==1 && r.yld>0 && !r.flags.length && !r.hard.length).map(r=>r.yld).sort((a,b)=>a-b);
+  return y.length ? y[Math.floor(y.length/2)] : null;
+}
+function distress(r, bench){
+  const out = [...r.flags];
+  const hit = stoplist.find(s => s.trim() && r.text.includes(s.trim().toLowerCase()));
+  if(hit) out.push(`стоп-лист: «${hit.trim()}»`);
+  if(r.price!=null && r.price < prefs.distPrice) out.push(`цена ${nf(r.price,2)}% номинала за ${r.days} дн. до погашения`);
+  if(bench!=null && r.yld!=null && r.yld > bench + (+prefs.distGap)) out.push(`доходность ${nf(r.yld,1)}% против медианы ${nf(bench,1)}% — рынок закладывает риск невыплаты`);
+  return out;
+}
+
+function classifyAll(){
+  const end = horizonEnd(), bench = benchmark(state.rows);
+  const minT = (+prefs.minTurn||0)*1e6, minN = +prefs.minTrades||0;
+  const main=[], risk=[], other=[];
+  for(const r of state.rows){
+    if(r.mat > end || !prefs.types.includes(r.type)) continue;
+    const L = liq(r); const x = {...r, ...L, reasons:[], risk:distress(r, bench)};
+    x.reasons.push(...r.hard);
+    const rt = ratingOf(r);
+    if(!prefs.rgroups.includes(rt)) x.reasons.push(rt ? `рейтинг ${RLABEL[rt]} вне выбранных групп` : "рейтинг не указан");
+    if(x.avg < minT || x.trades < minN) x.reasons.push(`низкая ликвидность: ${mln(x.avg)} млн ₽/день, ${x.trades} сделок за 5 сессий`);
+    const blocked = x.risk.length || x.reasons.length;
+    if(pinned.has(r.id)) { x.pinned = true; main.push(x); }
+    else if(!blocked) main.push(x);
+    if(x.risk.length) risk.push(x); else if(x.reasons.length) other.push(x);
+  }
+  return {main, risk, other, bench, end};
+}
 
 const COLS = [
   {k:"name",t:"Выпуск"},{k:"days",t:"Погашение"},{k:"price",t:"Цена, %"},{k:"bid",t:"Бид / Оффер"},{k:"spread",t:"Спред, б.п."},
-  {k:"turn3",t:"Оборот 3 дн, млн ₽"},{k:"trades3",t:"Сделок 3 дн"},{k:"today",t:"Сегодня, млн ₽"},{k:"yld",t:"Доходн., %"},
+  {k:"avg",t:"Ср. оборот 5 сессий, млн ₽/день"},{k:"trades",t:"Сделок 5 сессий"},{k:"today",t:"Сегодня, млн ₽"},{k:"yld",t:"Доходн., %"},
   {k:"income",t:"Доход до погаш., ₽"},{k:"cpn",t:"Купон / НКД"},{k:"list",t:"Листинг"},{k:"rating",t:"Рейтинг"}
 ];
-
-function visible(){
-  const minT = (+$("#minTurn").value||0)*1e6, minN = +$("#minTrades").value||0, mode = $("#rmode").value;
-  const shown=[], hidden=[];
-  for(const r of state.rows){
-    const lbl = `${r.name} (${r.id})`;
-    if(!state.types.has(r.type)) continue;
-    const rk = RANKS[ratingOf(r)]||0;
-    if(mode==="hide" && rk && rk<4){ hidden.push([lbl,"рейтинг ниже A"]); continue; }
-    if(mode==="strict" && rk<4){ hidden.push([lbl, rk ? "рейтинг ниже A" : "рейтинг не указан"]); continue; }
-    if(r.turn3/3 < minT || r.trades3 < minN){ hidden.push([lbl,`низкая ликвидность: ${mln(r.turn3/3)} млн ₽/день, ${r.trades3} сделок`]); continue; }
-    shown.push(r);
-  }
+function sortRows(arr){
   const {key,dir} = state.sort;
-  const val = r => key==="rating" ? (RANKS[ratingOf(r)]||0) : key==="name" ? r.name : r[key];
-  shown.sort((a,b)=>{ const x=val(a), y=val(b); if(x==null) return 1; if(y==null) return -1; return (x<y?-1:x>y?1:0)*dir; });
-  return {shown, hidden};
+  const val = r => key==="rating" ? RANKS[ratingOf(r)] : key==="name" ? r.name : r[key];
+  return arr.sort((a,b)=>{ const x=val(a), y=val(b); if(x==null) return 1; if(y==null) return -1; return (x<y?-1:x>y?1:0)*dir; });
+}
+function rowHtml(r, mode, maxTurn){
+  const sp = r.spread==null ? `<span class="dim">нет котировок</span>` : `<span class="pill ${r.spread<30?"ok":r.spread<100?"mid":"hi"}">${nf(r.spread,0)}</span>`;
+  const bars = state.sessions.map((d,i) => { const v=r.turn[i]; return v ? `<i style="height:${Math.max(3,v/maxTurn*18)}px" title="${fmtD(d)}: ${mln(v)} млн ₽"></i>` : `<i class="z" title="${fmtD(d)}: нет сделок"></i>`; }).join("");
+  const rt = ratingOf(r);
+  const offerNote = r.offerDate && r.offerDate < r.mat ? `<span class="days">оферта ${fmtD(r.offerDate)}</span>` : "";
+  const why = [...r.risk, ...r.reasons];
+  let act = "", cls = "";
+  if(mode==="main" && r.pinned){ act = `<button class="mini rm" data-unpin="${r.id}">Убрать</button>`; cls = r.risk.length ? "risk" : "pinned"; }
+  else if(mode!=="main"){ act = pinned.has(r.id) ? `<button class="mini rm" data-unpin="${r.id}">Убрать из таблицы</button>` : `<button class="mini" data-pin="${r.id}">В таблицу</button>`; cls = mode==="risk" ? "risk" : ""; }
+  const whyHtml = why.length && (mode!=="main" || r.pinned) ? `<span class="why">${mode==="main"?"добавлено вручную, вне фильтра: ":""}${why.map(esc).join("; ")}</span>` : "";
+  return `<tr class="${cls}">
+    <td><span class="name">${esc(r.name)}</span><span class="tag ${r.type==="gov"?"gov":""}">${TYPE_LABEL[r.type]}</span>${r.qual?`<span class="tag" title="Только для квалифицированных инвесторов">квал</span>`:""} ${act}<br><span class="isin">${r.isin||r.id} · ${r.board}</span>${whyHtml}</td>
+    <td class="num">${fmtD(r.mat)}<span class="days">через ${r.days} дн.</span>${offerNote}</td>
+    <td class="num" title="${r.priceSrc}">${nf(r.price,3)}</td>
+    <td class="num">${nf(r.bid,3)} / ${nf(r.offer,3)}${r.depth[0]||r.depth[1]?`<span class="days">в стакане ${mln(r.depth[0])} / ${mln(r.depth[1])} млн</span>`:""}</td>
+    <td>${sp}</td>
+    <td class="num"><span class="bars">${bars}</span>${mln(r.avg)}</td>
+    <td class="num">${r.trades}</td>
+    <td class="num">${mln(r.today)}</td>
+    <td class="num">${nf(r.yld,2)}</td>
+    <td class="num">${r.income==null?"—":nf(r.income,2)+" ₽"}<span class="days">${r.incomePa==null?"":nf(r.incomePa,1)+"% год."}</span></td>
+    <td class="num">${r.cpn==null?"—":nf(r.cpn,2)+"%"}<span class="days">НКД ${nf(r.nkd,2)}</span></td>
+    <td class="num">${r.list??"—"}</td>
+    <td><select class="rsel" data-id="${r.id}" aria-label="Рейтинг ${esc(r.name)}">${Object.keys(RLABEL).map(k=>`<option value="${k}" ${k===rt?"selected":""}>${RLABEL[k]}</option>`).join("")}</select></td>
+  </tr>`;
+}
+function fill(tbody, rows, mode, emptyText){
+  const maxTurn = Math.max(1, ...rows.flatMap(r=>r.turn));
+  tbody.innerHTML = rows.length ? sortRows(rows).map(r => rowHtml(r, mode, maxTurn)).join("") : `<tr><td colspan="${COLS.length}" class="empty">${emptyText}</td></tr>`;
 }
 
 function render(){
-  const {shown, hidden} = visible();
-  $("#head").innerHTML = COLS.map(c => `<th data-k="${c.k}" class="${state.sort.key===c.k?"sorted":""}" scope="col">${c.t}${state.sort.key===c.k?(state.sort.dir>0?" ↑":" ↓"):""}</th>`).join("");
-  const maxTurn = Math.max(1, ...shown.flatMap(r=>r.turn));
-  $("#body").innerHTML = shown.length ? shown.map(r => {
-    const sp = r.spread==null ? `<span class="dim">нет котировок</span>` : `<span class="pill ${r.spread<30?"ok":r.spread<100?"mid":"hi"}">${nf(r.spread,0)}</span>`;
-    const bars = [0,1,2].map(i => { const v=r.turn[i]; return v ? `<i style="height:${Math.max(3,v/maxTurn*18)}px" title="${fmtD(r.turnDays[i])}: ${mln(v)} млн ₽"></i>` : `<i class="z" title="нет сделок"></i>`; }).join("");
-    const rt = ratingOf(r);
-    const offerNote = r.offerDate && r.offerDate < r.mat ? `<span class="days">оферта ${fmtD(r.offerDate)}</span>` : "";
-    return `<tr>
-      <td><span class="name">${escapeHtml(r.name)}</span><span class="tag ${r.type==="gov"?"gov":""}">${TYPE_LABEL[r.type]}</span>${r.qual?`<span class="tag" title="Только для квалифицированных инвесторов">квал</span>`:""}<br><span class="isin">${r.isin||r.id} · ${r.board}</span></td>
-      <td class="num">${fmtD(r.mat)}<span class="days">через ${r.days} дн.</span>${offerNote}</td>
-      <td class="num" title="${r.priceSrc}">${nf(r.price,3)}</td>
-      <td class="num">${nf(r.bid,3)} / ${nf(r.offer,3)}${r.depth[0]||r.depth[1]?`<span class="days">в стакане ${mln(r.depth[0])} / ${mln(r.depth[1])} млн</span>`:""}</td>
-      <td>${sp}</td>
-      <td class="num"><span class="bars">${bars}</span>${mln(r.turn3)}</td>
-      <td class="num">${r.trades3}</td>
-      <td class="num">${mln(r.today)}</td>
-      <td class="num">${nf(r.yld,2)}</td>
-      <td class="num">${r.income==null?"—":nf(r.income,2)+" "+curSign(r.cur)}<span class="days">${r.incomePa==null?"":nf(r.incomePa,1)+"% год."}</span></td>
-      <td class="num">${r.cpn==null?"—":nf(r.cpn,2)+"%"}<span class="days">НКД ${nf(r.nkd,2)}</span></td>
-      <td class="num">${r.list??"—"}</td>
-      <td><select class="rsel" data-id="${r.id}" aria-label="Рейтинг ${escapeHtml(r.name)}">${Object.keys(RLABEL).map(k=>`<option value="${k}" ${k===rt?"selected":""}>${RLABEL[k]}</option>`).join("")}</select></td>
-    </tr>`;}).join("") : `<tr><td colspan="${COLS.length}" class="empty">Под текущие фильтры не подходит ни один выпуск. Снизьте порог оборота или включите другие типы эмитентов.</td></tr>`;
-
-  const allEx = [...state.excluded, ...hidden];
-  $("#exclSum").textContent = `Исключено из таблицы: ${allEx.length}`;
-  $("#exclList").innerHTML = allEx.map(([n,why]) => `<li>${escapeHtml(n)} — ${why}</li>`).join("") || "<li>нет</li>";
-
-  const sumTurn = shown.reduce((a,r)=>a+r.turn3,0);
-  const sp = shown.filter(r=>r.spread!=null).map(r=>r.spread).sort((a,b)=>a-b);
-  const med = sp.length ? sp[Math.floor(sp.length/2)] : null;
-  const next = shown.reduce((a,r)=> !a || r.mat<a.mat ? r : a, null);
+  syncControls();
+  const {main, risk, other, bench, end} = classifyAll();
+  $$("tr.head").forEach(h => h.innerHTML = COLS.map(c => `<th data-k="${c.k}" class="${state.sort.key===c.k?"sorted":""}" scope="col">${c.t}${state.sort.key===c.k?(state.sort.dir>0?" ↑":" ↓"):""}</th>`).join(""));
+  $("#h1").textContent = `Погашения рублёвых облигаций: ${HLABEL[prefs.horizon]}`;
+  fill($("#body"), main, "main", "Под текущие фильтры не подходит ни один выпуск. Снизьте порог оборота, расширьте срок или рейтинговые группы.");
+  fill($("#riskBody"), risk, "risk", "В выбранном сроке выпусков с признаками дефолта не найдено.");
+  fill($("#exclBody"), other, "excl", "Исключённых выпусков нет.");
+  $("#riskTitle").textContent = `На грани дефолта — исключены: ${risk.length}`;
+  $("#exclTitle").textContent = `Другие исключённые выпуски: ${other.length}`;
+  const sumAvg = main.reduce((a,r)=>a+r.avg,0);
+  const sp = main.filter(r=>r.spread!=null).map(r=>r.spread).sort((a,b)=>a-b);
+  const next = main.reduce((a,r)=> !a || r.mat<a.mat ? r : a, null);
   $("#summary").innerHTML = [
-    ["Выпусков в таблице", shown.length],
-    ["Оборот 3 дн, млн ₽", mln(sumTurn)],
-    ["Медианный спред, б.п.", med==null?"—":nf(med,0)],
-    ["Ближайшее погашение", next ? fmtD(next.mat) : "—"]
-  ].map(([l,v]) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
+    ["Выпусков в таблице", main.length, ""],
+    ["Ср. оборот в день, млн ₽", mln(sumAvg), ""],
+    ["Медианный спред, б.п.", sp.length?nf(sp[Math.floor(sp.length/2)],0):"—", ""],
+    ["Ближайшее погашение", next?fmtD(next.mat):"—", ""],
+    ["Риск дефолта, исключено", risk.length, risk.length?"alarm":""]
+  ].map(([l,v,c]) => `<div class="kpi ${c}"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
+  $("#stopInfo").textContent = `Исходный список составлен ${STOP_DATE}. Медиана доходности 1-го уровня: ${bench==null?"нет данных":nf(bench,1)+"%"}. Окно до ${fmtD(end)}.`;
 }
-const curSign = c => !c||c==="SUR"||c==="RUB" ? "₽" : c==="USD" ? "$" : c==="EUR" ? "€" : c==="CNY" ? "¥" : c;
-const escapeHtml = s => String(s??"").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
+function syncControls(){
+  $$("#horizon .chip").forEach(b => b.setAttribute("aria-pressed", b.dataset.h===prefs.horizon));
+  $$("#types .chip").forEach(b => b.setAttribute("aria-pressed", prefs.types.includes(b.dataset.t)));
+  $$("#rgroups .chip").forEach(b => b.setAttribute("aria-pressed", prefs.rgroups.includes(b.dataset.r)));
+  for(const k of ["minTurn","minTrades","distPrice","distGap"]) if(document.activeElement!==$("#"+k)) $("#"+k).value = prefs[k];
+  if(document.activeElement!==$("#stoplist")) $("#stoplist").value = stoplist.join("\n");
+}
+const savePrefs = () => store.set("bondPrefs", prefs);
+const esc = s => String(s??"").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
 function showBanner(html, err){ const b=$("#banner"); b.innerHTML=html; b.className="banner"+(err?" err":""); b.hidden=false; }
 function hideBanner(){ $("#banner").hidden=true; }
 function setProgress(p){ const el=$("#prog"); if(p==null){ el.hidden=true; return; } el.hidden=false; el.firstElementChild.style.width=(p*100)+"%"; }
 
 function demoRows(today){
   const add = n => isoLocal(new Date(new Date(today).getTime()+n*864e5));
-  const mk = (id,name,type,days,price,bid,offer,turn,trades,yld,cpn,nkd,list,cv) => {
-    const mat = add(days), cost = (offer??price)/100*1000+nkd, income = 1000+cv-cost;
-    return {id,board:type==="gov"?"TQOB":"TQCB",name,isin:"ДЕМО",type,issuer:"",mat,days,price,priceSrc:"демо",bid,offer,
+  state.sessions = [add(-7),add(-6),add(-5),add(-4),add(-3)];
+  const mk = (id,name,type,days,price,bid,offer,turn,trades,yld,cpn,nkd,list,cv,extra={}) => {
+    const cost=(offer??price)/100*1000+nkd, income=1000+cv-cost, byDate={};
+    state.sessions.forEach((d,i)=> byDate[d]={VALUE:turn[i],NUMTRADES:Math.round(trades/5)});
+    return Object.assign({id,board:type==="gov"?"TQOB":"TQCB",name,isin:"ДЕМО",type,text:name.toLowerCase(),mat:add(days),days,price,priceSrc:"демо",bid,offer,
       spread:bid&&offer?(offer-bid)/((offer+bid)/2)*1e4:null,yld,cpn,nkd,face:1000,cur:"SUR",income,incomePa:income/cost*365/days*100,
-      turnDays:[add(-4),add(-3),add(-1)],turn,turn3:turn.reduce((a,b)=>a+b,0),trades3:trades,today:turn[2]*0.4,list,qual:false,depth:[null,null]};
+      byDate,today:turn[4]*0.4,list,qual:false,depth:[null,null],hard:[],flags:[]}, extra);
   };
   return [
-    mk("DEMO1","ДЕМО ОФЗ 26-1","gov",3,99.92,99.91,99.94,[412e6,388e6,505e6],1240,16.4,7.0,33.1,1,34.9),
-    mk("DEMO2","ДЕМО Регион-34","sub",6,99.71,99.65,99.78,[18e6,9.5e6,22e6],96,17.8,8.5,38.2,1,42.4),
-    mk("DEMO3","ДЕМО Энерго БО-02","corp",8,99.55,99.50,99.62,[64e6,51e6,73e6],410,18.9,9.2,41.0,1,45.9),
-    mk("DEMO4","ДЕМО Город-1","mun",10,99.48,99.30,99.60,[3.1e6,1.4e6,2.2e6],18,18.2,8.1,36.0,2,40.4),
-    mk("DEMO5","ДЕМО Лизинг 001P","corp",12,99.10,98.90,99.35,[2.4e6,0.8e6,1.9e6],22,21.5,10.5,47.9,2,52.4),
-    mk("DEMO6","ДЕМО Ритейл БО-05","corp",13,99.30,99.22,99.38,[28e6,33e6,19e6],205,19.6,9.9,44.1,1,49.4)
+    mk("DEMO1","ДЕМО ОФЗ 26-1","gov",3,99.92,99.91,99.94,[412e6,388e6,505e6,450e6,390e6],1240,16.4,7.0,33.1,1,34.9),
+    mk("DEMO2","ДЕМО Регион-34","sub",6,99.71,99.65,99.78,[18e6,9.5e6,22e6,14e6,11e6],96,17.8,8.5,38.2,1,42.4),
+    mk("DEMO3","ДЕМО Энерго БО-02","corp",9,99.55,99.50,99.62,[64e6,51e6,73e6,58e6,61e6],410,18.9,9.2,41.0,1,45.9),
+    mk("DEMO4","ДЕМО Город-1","mun",11,99.48,99.30,99.60,[3.1e6,1.4e6,2.2e6,1.8e6,2.5e6],30,18.2,8.1,36.0,2,40.4),
+    mk("DEMO5","ДЕМО Ритейл БО-05","corp",13,99.30,99.22,99.38,[28e6,33e6,19e6,24e6,30e6],205,19.6,9.9,44.1,1,49.4),
+    mk("DEMO6","ДЕМО Девелопер 001P","corp",22,99.05,98.95,99.15,[12e6,15e6,9e6,11e6,13e6],140,20.4,10.2,46.0,1,51.0),
+    mk("DEMO7","ДЕМО Лизинг 002P","corp",12,94.10,93.80,94.60,[2.4e6,0.8e6,1.9e6,1.1e6,3.0e6],60,95.0,14.5,55.0,3,61.0),
+    mk("DEMO8","ДЕМО Банк СО-12","corp",10,99.40,99.2,99.6,[4e6,3e6,5e6,2e6,3e6],40,18.0,8.0,30.0,2,32.0,{hard:["структурная облигация"]}),
+    mk("DEMO9","ДЕМО Экспорт USD","corp",8,99.6,99.5,99.7,[30e6,22e6,25e6,28e6,26e6],120,6.0,4.0,12.0,1,20.0,{hard:["номинал в долларах"]})
   ];
 }
-function demoExcluded(){ return [["ДЕМО Банк СО-12 (DEMO7)","структурная облигация"],["ДЕМО Банк суборд (DEMO8)","субординированная"],["ДЕМО Микро БО-1 (DEMO9)","сектор ПИР (повышенный риск)"]]; }
 
 document.addEventListener("click", e => {
   const th = e.target.closest("th[data-k]");
   if(th){ const k=th.dataset.k; state.sort = {key:k, dir: state.sort.key===k ? -state.sort.dir : 1}; render(); return; }
-  const chip = e.target.closest(".chip");
-  if(chip){ const t=chip.dataset.t; const on = chip.getAttribute("aria-pressed")!=="true"; chip.setAttribute("aria-pressed",on); on?state.types.add(t):state.types.delete(t); render(); }
+  const b = e.target.closest("button"); if(!b) return;
+  if(b.dataset.h){ prefs.horizon = b.dataset.h; }
+  else if(b.dataset.t){ const t=b.dataset.t; prefs.types = prefs.types.includes(t) ? prefs.types.filter(x=>x!==t) : [...prefs.types,t]; }
+  else if(b.dataset.r!==undefined && b.classList.contains("chip")){ const r=b.dataset.r; prefs.rgroups = prefs.rgroups.includes(r) ? prefs.rgroups.filter(x=>x!==r) : [...prefs.rgroups,r]; }
+  else if(b.dataset.pin){ pinned.add(b.dataset.pin); store.set("bondPinned",[...pinned]); }
+  else if(b.dataset.unpin){ pinned.delete(b.dataset.unpin); store.set("bondPinned",[...pinned]); }
+  else if(b.id==="stopReset"){ stoplist = [...STOP_DEFAULT]; store.set("bondStoplist", stoplist); $("#stoplist").value = stoplist.join("\n"); }
+  else return;
+  savePrefs(); render();
 });
 document.addEventListener("change", e => {
-  if(e.target.classList.contains("rsel")){ const v=e.target.value; if(v) ratings[e.target.dataset.id]=v; else delete ratings[e.target.dataset.id]; saveRatings(); render(); }
-  else if(["minTurn","minTrades","rmode"].includes(e.target.id)) render();
+  if(e.target.classList.contains("rsel")){ const v=e.target.value; if(v) ratings[e.target.dataset.id]=v; else delete ratings[e.target.dataset.id]; store.set("bondRatings", ratings); render(); }
 });
-$("#minTurn").addEventListener("input", render); $("#minTrades").addEventListener("input", render);
+for(const k of ["minTurn","minTrades","distPrice","distGap"]) $("#"+k).addEventListener("input", e => { prefs[k] = e.target.value===""?0:+e.target.value; savePrefs(); render(); });
+$("#stoplist").addEventListener("input", e => { stoplist = e.target.value.split("\n").map(s=>s.trim()).filter(Boolean); store.set("bondStoplist", stoplist); render(); });
 $("#reload").addEventListener("click", loadAll);
 setInterval(() => { if($("#auto").checked && !state.demo && document.visibilityState==="visible") loadAll(); }, 60000);
-loadAll();
+render(); loadAll();
 </script>
 
 </body></html>
