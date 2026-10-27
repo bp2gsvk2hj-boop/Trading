@@ -530,6 +530,40 @@ class CollateralTest(unittest.TestCase):
             e._rebalance(NOW + timedelta(minutes=30))
             self.assertLess(e.broker.cash(), 25_000)                 # back to ~2% cash
 
+    def test_capital_cap_keeps_the_rest_in_rubles(self):
+        from dataclasses import replace
+        with tempfile.TemporaryDirectory() as tmp:
+            e = self._engine(tmp, [bar(NOW - H, 100, 100, 100, 100)])
+            e.cfg.risk = replace(e.cfg.risk, capital_rub=100_000)
+            e.broker.s["sec"] = {"fund": 9_800.0}                    # 980 000 in the fund, 1M cash
+            e._rebalance(NOW)
+            # manage 100 000: fund = 98 000 (980 units), the rest stays in cash
+            self.assertEqual(e.broker.units("fund"), 980)
+            self.assertGreater(e.broker.cash(), 1_800_000)
+            before = e.broker.units("fund")
+            e._rebalance(NOW + timedelta(minutes=15))
+            self.assertEqual(e.broker.units("fund"), before)          # stable: no churn
+
+    def test_resize_cuts_position_and_moves_stop(self):
+        from dataclasses import replace
+        with tempfile.TemporaryDirectory() as tmp:
+            e = self._engine(tmp, flat_then_breakout())
+            e.broker.s["money"] = 20_000.0
+            e.broker.s["sec"] = {"fund": 9_800.0}
+            e.run_once(NOW)
+            big = e.broker.holding(INST).qty
+            stop = e.broker.stops(INST)[0].price
+            self.assertGreater(big, 10)
+            e.cfg.risk = replace(e.cfg.risk, capital_rub=100_000)
+            e.notes = []
+            e.resize(NOW + timedelta(minutes=5))
+            small = e.broker.holding(INST).qty
+            self.assertTrue(0 < small < big / 5, (big, small))
+            st = e.broker.stops(INST)
+            self.assertEqual([(s.side, s.qty, s.price) for s in st], [(-1, small, stop)])
+            self.assertTrue(any(n.startswith("[market]") and "resize to" in n for n in e.notes), e.notes)
+            self.assertLessEqual(e.broker.units("fund") * 102, 100_000)
+
     def test_sizing_counts_the_fund_as_capital(self):
         with tempfile.TemporaryDirectory() as tmp:
             bars = flat_then_breakout()

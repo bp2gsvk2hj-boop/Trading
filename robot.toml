@@ -28,7 +28,8 @@ cash_max = 0.04
 haircut = 0.40
 
 [risk]
-capital_rub = 1000000       # sizing uses min(this, free money + margin in use)
+capital_rub = 100000        # since 27.10.2026 (was 1M). Sizing uses min(this, cash + LQDT); money above
+                            # it stays in rubles, outside the robot (not put into LQDT)
 risk_per_trade = 0.01       # target loss at the stop, share of capital
 max_risk_per_trade = 0.03   # skip the trade if even 1 contract risks more
 max_margin_share = 0.6      # GO of all positions <= 60% of capital. LQDT counts as 60% of its value,
