@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>
+<title>Новые размещения облигаций</title>
+<!-- Локальная версия приложения: откройте этот файл двойным щелчком в Chrome, Edge, Firefox или Яндекс Браузере. Нужен интернет: данные MOEX ISS, рейтинги из GitHub, библиотека Excel с cdnjs. -->
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: same terminal-style system as /bonds/ — period bar, summary strip, main table, "needs rating" panel, excluded list */
+:root{
+  --bg:#f3f5f8; --panel:#ffffff; --fg:#14202e; --muted:#5d6b7c; --line:#dde3ea; --soft:#eaf0f6;
+  --accent:#1d4ed8; --accent-soft:#e3ebff;
+  --good:#0f7a4a; --good-soft:#e1f4ea; --warn:#a15c00; --warn-soft:#fdf0d9; --bad:#b42318; --bad-soft:#fde7e5;
+  --sans:"IBM Plex Sans",-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e141b; --panel:#151d27; --fg:#e3e9f0; --muted:#8c9aab; --line:#25313f; --soft:#1b2531;
+  --accent:#7ea2ff; --accent-soft:#1c2a4d;
+  --good:#4cc38a; --good-soft:#123326; --warn:#f0b357; --warn-soft:#382811; --bad:#ff8577; --bad-soft:#3a1916;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e141b; --panel:#151d27; --fg:#e3e9f0; --muted:#8c9aab; --line:#25313f; --soft:#1b2531;
+  --accent:#7ea2ff; --accent-soft:#1c2a4d;
+  --good:#4cc38a; --good-soft:#123326; --warn:#f0b357; --warn-soft:#382811; --bad:#ff8577; --bad-soft:#3a1916;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.45}
+.wrap{max-width:1360px;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:16px}
+header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between}
+h1{font-size:22px;font-weight:600;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-size:15px;font-weight:600;margin:0}
+.sub{color:var(--muted);margin:2px 0 0;font-size:13px}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button,select,input,textarea{font:inherit;color:inherit}
+.btn{background:var(--accent);color:var(--panel);border:0;border-radius:6px;padding:8px 14px;font-weight:500;cursor:pointer}
+.btn.ghost{background:var(--panel);color:var(--accent);border:1px solid var(--line)}
+.btn:disabled{opacity:.55;cursor:default}
+.mini{border:1px solid var(--line);background:var(--panel);border-radius:4px;padding:1px 8px;font-size:12px;cursor:pointer;color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stamp{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.banner{border:1px solid var(--warn);background:var(--warn-soft);border-radius:8px;padding:10px 14px;font-size:13px}
+.banner b{color:var(--warn)}
+.banner.err{border-color:var(--bad);background:var(--bad-soft)}
+.banner.okb{border-color:var(--good);background:var(--good-soft)}
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.kpi{background:var(--panel);padding:10px 14px}
+.kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.kpi .v{font-family:var(--mono);font-size:20px;font-weight:500;font-variant-numeric:tabular-nums}
+.kpi.alarm .v{color:var(--warn)}
+.filters{display:grid;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.frow{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center}
+.fg{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fg>span{font-size:12px;color:var(--muted)}
+.chip{border:1px solid var(--line);background:transparent;border-radius:999px;padding:3px 10px;font-size:13px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.filters input[type=date],.filters select{padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);font-family:var(--mono);font-size:13px}
+.rules{font-size:12px;color:var(--muted)}
+.tablebox{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:separate;border-spacing:0;width:100%;min-width:1180px;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;vertical-align:middle;white-space:nowrap}
+th{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--soft);cursor:pointer;user-select:none}
+th.sorted{color:var(--accent)}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;z-index:1;background:var(--panel);border-right:1px solid var(--line)}
+th:first-child{background:var(--soft);z-index:2}
+td.l{text-align:left}
+tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--soft)}
+.num{font-family:var(--mono);font-size:13px}
+.name{font-weight:500}
+.isin{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.full{display:block;font-size:12px;color:var(--muted);white-space:normal;max-width:300px}
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:4px;background:var(--soft);color:var(--muted);margin-left:6px;font-weight:500}
+.tag.gov{background:var(--accent-soft);color:var(--accent)}
+.why{display:block;white-space:normal;max-width:320px;font-size:12px;margin-top:3px;color:var(--warn)}
+.pill{display:inline-block;font-family:var(--mono);font-size:12px;padding:1px 7px;border-radius:4px;font-weight:500}
+.ok{background:var(--good-soft);color:var(--good)}.mid{background:var(--warn-soft);color:var(--warn)}.hi{background:var(--bad-soft);color:var(--bad)}
+.dim{color:var(--muted)}
+.days{display:block;font-size:11px;color:var(--muted)}
+.rin{width:210px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--bg);font-family:var(--mono);font-size:12px}
+.rin.need{border-color:var(--warn)}
+.ag{display:block;font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:2px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;gap:10px}
+.panel.need{border-color:var(--warn);border-left-width:4px}
+.panel.need h2{color:var(--warn)}
+.panel summary{cursor:pointer}
+.panel summary h2{display:inline}
+.panel p{margin:0;font-size:13px;color:var(--muted);max-width:100ch}
+.panel .tablebox{border-radius:6px}
+.notes{font-size:12px;color:var(--muted);max-width:100ch;display:grid;gap:4px}
+.notes code{font-family:var(--mono);font-size:11px;background:var(--soft);padding:0 4px;border-radius:3px}
+.empty{padding:22px;text-align:center;color:var(--muted);white-space:normal}
+.progress{height:3px;background:var(--line);border-radius:2px;overflow:hidden}
+.progress i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+@media (prefers-reduced-motion:reduce){.progress i{transition:none}}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Новые размещения облигаций</h1>
+      <p class="sub">Рублёвые выпуски российских эмитентов, размещённые за последние 3 месяца · объём от 1 млрд ₽ · рейтинг эмитента не ниже AA · данные MOEX ISS, АКРА, Эксперт РА, НКР, НРА</p>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="reload">Обновить</button>
+      <button class="btn" id="export">Скачать Excel</button>
+    </div>
+  </header>
+  <div class="stamp" id="stamp">Загрузка…</div>
+  <div class="progress" id="prog" hidden><i></i></div>
+  <div class="banner" id="banner" hidden></div>
+
+  <section class="summary" id="summary"></section>
+
+  <section class="filters" aria-label="Период и порог рейтинга">
+    <div class="frow">
+      <div class="fg"><span>Размещение с</span><input type="date" id="from" aria-label="Дата размещения с"><span>по</span><input type="date" id="to" aria-label="Дата размещения по"></div>
+      <div class="fg" id="quick"><span>Быстро</span>
+        <button class="chip" data-q="7">Неделя</button>
+        <button class="chip" data-q="1m">Месяц</button>
+        <button class="chip" data-q="3m">3 месяца</button>
+      </div>
+      <label class="fg"><span>Мин. рейтинг</span>
+        <select id="minGrade"><option value="AA">AA и выше</option><option value="AA-">AA− и выше</option></select>
+      </label>
+    </div>
+    <div class="rules" id="rules"></div>
+  </section>
+
+  <div class="tablebox"><table><thead><tr class="head" data-t="main"></tr></thead><tbody id="body"></tbody></table></div>
+
+  <section class="panel need" id="needPanel">
+    <h2 id="needTitle">Нужен рейтинг</h2>
+    <p>Выпуски прошли по дате, объёму и типу, но у эмитента не найден рейтинг ни одного из четырёх агентств: либо его нет, либо название у агентства не совпало с названием на бирже. Проверьте эмитента и впишите рейтинги в поле через запятую в формате агентства: <b>AA(RU)</b> — АКРА, <b>ruAA+</b> — Эксперт РА, <b>AA.ru</b> — НКР, <b>AA|ru|</b> — НРА. Берётся минимальный. Можно загрузить файл целиком: кнопка ниже.</p>
+    <div class="fg">
+      <label class="btn ghost" for="rfile" style="cursor:pointer">Загрузить рейтинги (xlsx, csv)</label>
+      <input type="file" id="rfile" class="vh" accept=".xlsx,.xls,.csv">
+      <button class="btn ghost" id="rexport">Выгрузить рейтинги</button>
+      <span class="dim" id="rinfo"></span>
+    </div>
+    <div class="tablebox"><table><thead><tr class="head" data-t="need"></tr></thead><tbody id="needBody"></tbody></table></div>
+  </section>
+
+  <details class="panel" id="exclPanel">
+    <summary><h2 id="exclTitle">Исключены</h2></summary>
+    <p>Размещены в выбранный период, но не прошли правила: объём меньше 1 млрд ₽, срок от размещения до погашения меньше полугода, рейтинг ниже порога, номинал не в рублях, структурные, субординированные, ЦФА, ИОС Сбербанка, ипотечные ценные бумаги или секьюритизация (кроме СФО СБ Секьюритизация).</p>
+    <div class="tablebox"><table><thead><tr class="head" data-t="excl"></tr></thead><tbody id="exclBody"></tbody></table></div>
+  </details>
+
+  <div class="notes">
+    <div>Дата размещения — поле ISSUEDATE в описании выпуска на MOEX. Для выпусков через книгу заявок это день технического размещения, он же день его завершения.</div>
+    <div>Ипотечные ценные бумаги — выпуски, у которых в наименовании на MOEX указано ипотечное покрытие (облигации ипотечных агентов, ДОМ.РФ и банков). Облигации секьюритизации — выпуски СФО с залогом денежных требований — тоже исключаются, кроме бумаг СФО СБ Секьюритизация.</div><div>Объём выпуска — количество бумаг × первоначальный номинал. ОФЗ получают суверенный рейтинг AAA автоматически.</div>
+    <div>Рейтинг — минимальный из кредитных рейтингов эмитента и рейтингов самого выпуска по национальной шкале. Рейтинги выпусков (НКР, Эксперт РА, включая секьюритизацию .sf) закрывают СФО, ипотечных агентов и финансовые «дочки». Если у свежего выпуска нет ни одного рейтинга агентств, берётся рейтинг со страницы облигации на Smart-Lab — это агрегатор, источник помечен в таблице и в Excel.</div><div>Каждое утро GitHub Actions собирает рейтинги с сайтов АКРА, НКР, Эксперт РА и из базы Финмаркета (НРА) в <code>placements/ratings.json</code>. Эмитенты АКРА и НКР привязываются к бирже по ИНН, Эксперт РА и НРА — по названию; несовпавшие названия можно привязать вручную в <code>placements/rating_aliases.json</code>.</div><div>Рейтинги, введённые или загруженные здесь, хранятся в этом браузере и важнее собранных.</div>
+    <div>В файле Excel — только итоговая таблица, рейтинги по каждому агентству в отдельных столбцах, и лист с параметрами отбора.</div>
+  </div>
+</div>
+
+<script>
+const ISS = "https://iss.moex.com/iss";
+const BOARD_ORDER = ["TQCB","TQOB","TQRD","TQIR","TQOY","TQOD","TQOE"];
+const MIN_VOLUME = 1e9;
+const MIN_TERM_MONTHS = 6;   // срок обращения (от размещения до погашения) меньше полугода — исключаем
+const AGENCIES = ["АКРА","Эксперт РА","НКР","НРА"];
+const SCALE = ["D","RD","C","CC","CCC","B","BB","BBB","A","AA","AAA"];
+const TYPE_LABEL = {gov:"ОФЗ",sub:"Субфед.",mun:"Муницип.",corp:"Корп."};
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v==null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+};
+
+/* ---------- dates ---------- */
+const isoLocal = d => new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
+const todayIso = () => isoLocal(new Date());
+const monthsAgo = n => { const d = new Date(); d.setMonth(d.getMonth()-n); return isoLocal(d); };
+const addMonths = (iso, n) => { const [y,m,dd] = iso.split("-").map(Number); const d = new Date(y, m-1+n, dd); if(d.getDate()!==dd) d.setDate(0); return isoLocal(d); };
+const fmtD = d => d ? d.split("-").reverse().join(".") : "—";
+const WIN_START = monthsAgo(3);
+
+/* ---------- ratings ---------- */
+const LAT = {"А":"A","В":"B","С":"C","Д":"D","Р":"R"};
+function gradeOf(raw){
+  let s = String(raw||"").trim().replace(/[АВСДР]/g, ch => LAT[ch]).replace(/[–−]/g,"-").toUpperCase();
+  s = s.replace(/\(RU\)|\|RU\||\.RU$/g,"").replace(/\.SF\b|\(SF\)/g,"").replace(/^RU/,"").replace(/\s+/g,"");
+  const m = s.match(/^(AAA|AA|A|BBB|BB|B|CCC|CC|C|RD|SD|D)([+-]?)$/);
+  if(!m) return null;
+  const base = m[1]==="SD" ? "RD" : m[1];
+  return {label: base + m[2], rank: SCALE.indexOf(base)*3 + (m[2]==="+"?1:m[2]==="-"?-1:0)};
+}
+function agencyOf(raw){
+  const s = String(raw).trim();
+  if(/\(RU\)$/i.test(s)) return "АКРА";
+  if(/\|ru\|$/i.test(s)) return "НРА";
+  if(/\.ru$/i.test(s)) return "НКР";
+  if(/^ru/i.test(s)) return "Эксперт РА";
+  return "";
+}
+function parseRatingText(text){   // "AA(RU), ruAA+" -> {АКРА:"AA(RU)", "Эксперт РА":"ruAA+"}
+  const out = {};
+  String(text||"").split(/[;,\n]+|\s+/).map(x=>x.trim()).filter(Boolean).forEach(tok => {
+    if(!gradeOf(tok)) return;
+    const a = agencyOf(tok) || "Другое";
+    out[a] = tok;
+  });
+  return out;
+}
+let repoRatings = {};                          // ручные рейтинги выпусков из ratings.json (по ISIN)
+let issuerDb = {byInn:{}, isinInn:{}, byIsin:{}, fallback:{}, updated:null, sources:{}};  // рейтинги из ratings.json
+const issuerOf = isin => { const inn = state.innOf[isin]?.inn || issuerDb.isinInn[isin]; if(!inn) return null; const rec = issuerDb.byInn[inn]; return {inn, name: rec?.name || state.innOf[isin]?.title || "", ratings: rec?.ratings || {}}; };
+const issuerRatings = isin => { const x = issuerOf(isin), o = {}; if(x) for(const a in x.ratings) o[a] = x.ratings[a].r; return o; };
+let myRatings = store.get("placementRatings", {});  // {ISIN: {agency: raw}}
+// рейтинги выпуска (НКР, Эксперт РА) — под ключом «агентство, выпуск»; Smart-Lab — только если нет ни одного рейтинга агентств
+const issueRatings = isin => { const o = {}, x = issuerDb.byIsin[isin] || {}; for(const a in x) o[a + ", выпуск"] = x[a].r; return o; };
+function ratingsFor(isin){
+  const all = {...issuerRatings(isin), ...issueRatings(isin), ...(repoRatings[isin]||{}), ...(myRatings[isin]||{})};
+  const any = Object.values(all).some(v => gradeOf(v));
+  const fb = issuerDb.fallback[isin];
+  if(!any && fb && gradeOf(fb.r)) all["Smart-Lab"] = fb.r;
+  return all;
+}
+function minRating(r){
+  if(r.type==="gov") return {label:"AAA", rank:SCALE.indexOf("AAA")*3, by:"суверенный"};
+  const all = ratingsFor(r.isin); let best = null;
+  for(const a in all){ const g = gradeOf(all[a]); if(g && (!best || g.rank < best.rank)) best = {...g, by:a}; }
+  return best;
+}
+const ratingText = isin => Object.values(ratingsFor(isin)).filter(Boolean).join(", ");
+
+/* ---------- state ---------- */
+const prefs = Object.assign({from: WIN_START, to: todayIso(), minGrade:"AA"}, store.get("placementPrefs", {}));
+let descCache = store.get("placementDesc_v3", {});
+let state = {rows:[], demo:false, sort:{key:"placed", dir:-1}, innOf:{}};
+
+async function getJ(url){
+  const sep = url.includes("?") ? "&" : "?";
+  const r = await fetch(url + sep + "iss.meta=off", {cache:"no-store"});
+  if(!r.ok) throw new Error("MOEX ответил " + r.status);
+  return r.json();
+}
+const rowsOf = b => b ? b.data.map(d => Object.fromEntries(b.columns.map((c,i)=>[c,d[i]]))) : [];
+async function pool(items, n, fn, onStep){
+  let i=0, done=0; const out=[];
+  await Promise.all(Array.from({length:n}, async () => {
+    while(i<items.length){ const k=i++; try{ out[k]=await fn(items[k]); }catch(e){ out[k]=null; } onStep && onStep(++done); }
+  }));
+  return out;
+}
+
+function classify(s, t){
+  const x = ((s.BONDTYPE||"")+" "+(s.BONDSUBTYPE||"")+" "+t).toLowerCase();
+  if(/офз|ofz|государств/.test(x) || s.SECTYPE==="3" || s.BOARDID==="TQOB") return "gov";
+  if(/субфед|subfederal|регион/.test(x) || s.SECTYPE==="5") return "sub";
+  if(/муницип|municipal/.test(x) || s.SECTYPE==="C") return "mun";
+  return "corp";
+}
+const isRub = c => !c || c==="SUR" || c==="RUB";
+
+/* Compact, permanent cache of the fields we need from /securities/{id} (placement date never changes). */
+function compactDesc(rows){
+  const m = {}; rows.forEach(x => m[x.name] = x.value);
+  const textKeys = Object.keys(m).filter(k => /TYPE|GROUP|NAME|EMIT|STRUCT|SUBORD|PURPOSE|PROGRAM/i.test(k));
+  return {
+    d: m.ISSUEDATE || null,
+    f: m.INITIALFACEVALUE ? +m.INITIALFACEVALUE : null,
+    n: m.ISSUESIZE ? +m.ISSUESIZE : null,
+    q: m.ISQUALIFIEDINVESTORS==="1",
+    s: m.ISSUBORDINATED==="1",
+    st: Object.keys(m).some(k => /STRUCT/i.test(k) && m[k]==="1"),
+    t: textKeys.map(k => m[k]).filter(v => v && isNaN(+v)).join(" ").slice(0,400),
+    e: m.EMITTER_TITLE || m.EMITENT_TITLE || "",
+    // ипотечные ценные бумаги: в наименовании выпуска MOEX — «с ипотечным покрытием» (ипотечные облигации, ИСУ)
+    mo: /ипотечн\S* покрыти|ипотечн\S* сертификат/i.test([m.ISSUENAME, m.NAME].join(" ")) || /ипотечный агент/i.test(m.NAME || ""),
+    // секьюритизация: облигации СФО с залогом денежных требований; СФО СБ Секьюритизация и проектное финансирование СОПФ оставляем
+    sc: /залог/i.test(m.ISSUENAME || "") && /денежн\S* требовани/i.test(m.ISSUENAME || "") && !/сб\s*секьюритизац|сопф/i.test([m.NAME, m.SHORTNAME].join(" "))
+  };
+}
+
+async function loadAll(){
+  const btn = $("#reload"); btn.disabled = true; setProgress(0.05);
+  const today = todayIso();
+  try{
+    for(const u of ["https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/placements/ratings.json"]){  // локальный запуск: рейтинги берутся из репозитория на GitHub
+      try{ const r = await fetch(u, {cache:"no-store"}); if(r.ok){ const j = await r.json();
+        if(!issuerDb.updated || (j.updated||"") > issuerDb.updated){ repoRatings = j.ratings || {}; issuerDb = {byInn:j.by_inn||{}, isinInn:j.isin_inn||{}, byIsin:j.by_isin||{}, fallback:j.fallback||{}, updated:j.updated||null, sources:j.sources||{}}; } } }catch(e){}
+    }
+    const j = await getJ(`${ISS}/engines/stock/markets/bonds/securities.json?iss.only=securities,marketdata&marketdata.columns=SECID,BOARDID,LAST,WAPRICE,MARKETPRICETODAY,YIELD`);
+    const md = {}; rowsOf(j.marketdata).forEach(m => md[m.SECID+"|"+m.BOARDID] = m);
+    const bySec = {};
+    for(const s of rowsOf(j.securities)){
+      const rank = BOARD_ORDER.indexOf(s.BOARDID); const r = rank<0 ? 99 : rank;
+      if(!bySec[s.SECID] || r < bySec[s.SECID]._r) bySec[s.SECID] = {...s, _r:r};
+    }
+    // Cheap pre-filter on the market list: not matured, and either the list already says it was placed before the window, or it's a candidate.
+    const cand = Object.values(bySec).filter(s => (!s.MATDATE || s.MATDATE==="0000-00-00" || s.MATDATE >= today) && !(s.ISSUEDATE && s.ISSUEDATE < WIN_START));
+    setProgress(0.12);
+    const need = cand.filter(s => !descCache[s.SECID]);
+    let step = 0;
+    await pool(need, 8, s => getJ(`${ISS}/securities/${s.SECID}.json?iss.only=description&description.columns=name,title,value`)
+      .then(r => { descCache[s.SECID] = compactDesc(rowsOf(r.description)); }),
+      () => setProgress(0.12 + 0.88*(++step)/(need.length||1)));
+    store.set("placementDesc_v3", descCache);
+    state.rows = cand.map(s => build(s, md[s.SECID+"|"+s.BOARDID]||{}, descCache[s.SECID])).filter(r => r && r.placed && r.placed >= WIN_START && r.placed <= today);
+    // ИНН эмитента: из ratings.json, а для свежих выпусков, которых там ещё нет, — запросом к MOEX
+    const noInn = state.rows.filter(r => r.isin && !issuerDb.isinInn[r.isin] && !descCache[r.id]?.inn);
+    await pool(noInn, 6, r => getJ(`${ISS}/securities.json?q=${r.isin}&iss.only=securities&securities.columns=isin,emitent_inn,emitent_title`)
+      .then(j => { const x = rowsOf(j.securities).find(y => y.isin===r.isin); if(x && x.emitent_inn) Object.assign(descCache[r.id], {inn:x.emitent_inn, en:x.emitent_title||""}); }));
+    store.set("placementDesc_v3", descCache);
+    state.rows.forEach(r => { const d = descCache[r.id]; if(d?.inn) state.innOf[r.isin] = {inn:d.inn, title:d.en}; });
+    const failed = Object.entries(issuerDb.sources).filter(([,v]) => !v.ok).map(([k]) => k);
+    state.demo = false;
+    if(!issuerDb.updated) showBanner(`<b>Рейтинги эмитентов ещё не собраны.</b> Файл ratings.json пуст — запустите в GitHub Actions задачу «Ratings for placements app» или дождитесь утреннего запуска. Пока рейтинги можно вписать вручную.`);
+    else if(failed.length) showBanner(`<b>Не обновились рейтинги: ${failed.map(esc).join(", ")}.</b> Для них используются данные прошлого сбора.`);
+    else hideBanner();
+    const ratedAt = issuerDb.updated ? new Date(issuerDb.updated).toLocaleString("ru-RU") : "нет";
+    $("#stamp").textContent = `Обновлено ${new Date().toLocaleString("ru-RU")} · выпусков, размещённых с ${fmtD(WIN_START)}: ${state.rows.length} · рейтинги эмитентов собраны: ${ratedAt} (${Object.keys(issuerDb.byInn).length} эмитентов) · ваших правок: ${Object.keys(myRatings).length}`;
+  }catch(e){
+    if(!state.rows.length || state.demo){
+      state.rows = demoRows(); state.demo = true;
+      showBanner(`<b>Демо-данные, не реальные выпуски.</b> Из этого окна нет доступа к MOEX ISS (${esc(e.message||"сетевая ошибка")}). Откройте приложение по ссылке GitHub Pages в обычном браузере.`);
+      $("#stamp").textContent = "Демо-режим";
+    } else showBanner(`<b>Не удалось обновить:</b> ${esc(e.message||"сетевая ошибка")}. Показаны данные последнего успешного обновления.`, "err");
+  }
+  setProgress(null); btn.disabled = false; render();
+}
+
+function build(s, m, d){
+  if(!d) return null;
+  const text = [s.SHORTNAME, s.SECNAME, s.BONDTYPE, s.BONDSUBTYPE, d.t].join(" ");
+  const lt = text.toLowerCase();
+  const face = d.f || s.FACEVALUE || null, size = d.n || s.ISSUESIZE || null;
+  const hard = [];
+  const volume = face && size ? face*size : null;
+  if(!isRub(s.FACEUNIT)) hard.push("номинал не в рублях ("+s.FACEUNIT+")");
+  if(d.st || /структур|structur/.test(lt)) hard.push("структурная облигация");
+  if(d.s || /суборд|subordin/.test(lt)) hard.push("субординированная");
+  if(/цфа|цифров\w* финансов\w* актив/.test(lt)) hard.push("ЦФА");
+  if(/\bиос\b|инвестиционн\w* облигац/.test(lt) && /сбер/.test(lt)) hard.push("ИОС Сбербанка");
+  if(d.mo) hard.push("ипотечная ценная бумага");
+  if(d.sc) hard.push("секьюритизация: облигации СФО с залогом денежных требований");
+  if(volume!=null && volume < MIN_VOLUME) hard.push(`объём ${bn(volume)} млрд ₽ — меньше 1 млрд`);
+  if(volume==null) hard.push("объём выпуска не указан на бирже");
+  const mat = s.MATDATE && s.MATDATE!=="0000-00-00" ? s.MATDATE : null;
+  if(mat && d.d && mat < addMonths(d.d, MIN_TERM_MONTHS)) hard.push(`срок обращения меньше ${MIN_TERM_MONTHS} мес.: размещение ${fmtD(d.d)}, погашение ${fmtD(mat)}`);
+  return {
+    id:s.SECID, board:s.BOARDID, name:s.SHORTNAME, full:s.SECNAME, isin:s.ISIN, emitter:d.e,
+    type: classify(s, d.t), placed:d.d, mat: s.MATDATE && s.MATDATE!=="0000-00-00" ? s.MATDATE : null,
+    offer: s.OFFERDATE || s.BUYBACKDATE || null, volume, face, cpn:s.COUPONPERCENT, freq:s.COUPONPERIOD,
+    price: m.LAST ?? m.MARKETPRICETODAY ?? m.WAPRICE ?? s.PREVWAPRICE ?? null, yld: m.YIELD || null,
+    list:s.LISTLEVEL, qual:d.q, hard
+  };
+}
+
+/* ---------- sort / split ---------- */
+function split(){
+  const from = prefs.from, to = prefs.to, thr = gradeOf(prefs.minGrade).rank;
+  const main=[], need=[], excl=[];
+  for(const r0 of state.rows){
+    if(r0.placed < from || r0.placed > to) continue;
+    const g = minRating(r0); const r = {...r0, g, reasons:[...r0.hard]};
+    if(g && g.rank < thr) r.reasons.push(`мин. рейтинг ${g.label} (${g.by}) ниже ${prefs.minGrade}`);
+    if(r.reasons.length) excl.push(r); else if(!g) need.push(r); else main.push(r);
+  }
+  return {main, need, excl};
+}
+const COLS = [
+  {k:"name",t:"Выпуск"},{k:"placed",t:"Размещение"},{k:"mat",t:"Погашение"},{k:"volume",t:"Объём, млрд ₽"},
+  {k:"cpn",t:"Купон, %"},{k:"price",t:"Цена, %"},{k:"yld",t:"Доходн., %"},{k:"rating",t:"Рейтинги (мин.)"},{k:"list",t:"Листинг"}
+];
+function sortRows(arr){
+  const {key,dir} = state.sort;
+  const val = r => key==="rating" ? (r.g?r.g.rank:null) : key==="name" ? r.name : r[key];
+  return arr.sort((a,b)=>{ const x=val(a), y=val(b); if(x==null) return 1; if(y==null) return -1; return (x<y?-1:x>y?1:0)*dir; });
+}
+const bn = v => v==null ? "—" : (v/1e9).toLocaleString("ru-RU",{maximumFractionDigits: v<1e10?2:1});
+const nf = (v,d=2) => v==null||v===""||isNaN(v) ? "—" : (+v).toLocaleString("ru-RU",{minimumFractionDigits:d,maximumFractionDigits:d});
+function ratingCell(r, mode){
+  if(r.type==="gov") return `<span class="pill ok">AAA</span><span class="ag">суверенный</span>`;
+  const g = r.g, cls = !g ? "" : g.rank >= gradeOf("AA").rank ? "ok" : g.rank >= gradeOf("A-").rank ? "mid" : "hi";
+  return `${g?`<span class="pill ${cls}">${g.label}</span> `:""}<input class="rin ${g?"":"need"}" data-isin="${esc(r.isin)}" value="${esc(ratingText(r.isin))}" placeholder="AA(RU), ruAA+, AA.ru, AA|ru|" aria-label="Рейтинги ${esc(r.name)}">${g?`<span class="ag">мин.: ${esc(g.by)}${g.by==="Smart-Lab"?" — агрегатор, агентство не указано":""}</span>`:""}`;
+}
+function rowHtml(r, mode){
+  const offer = r.offer && (!r.mat || r.offer < r.mat) ? `<span class="days">оферта ${fmtD(r.offer)}</span>` : "";
+  const why = mode==="excl" && r.reasons.length ? `<span class="why">${r.reasons.map(esc).join("; ")}</span>` : "";
+  return `<tr>
+    <td><span class="name">${esc(r.name)}</span><span class="tag ${r.type==="gov"?"gov":""}">${TYPE_LABEL[r.type]}</span>${r.qual?`<span class="tag" title="Только для квалифицированных инвесторов">квал</span>`:""}<br><span class="isin">${esc(r.isin||r.id)} · ${esc(r.board)}</span><span class="full">${esc(issuerOf(r.isin)?.name || r.full || "")}${issuerOf(r.isin)?` · ИНН ${esc(issuerOf(r.isin).inn)}`:""}</span>${why}</td>
+    <td class="num">${fmtD(r.placed)}</td>
+    <td class="num">${r.mat?fmtD(r.mat):"бессрочн."}${offer}</td>
+    <td class="num">${bn(r.volume)}</td>
+    <td class="num">${nf(r.cpn,2)}</td>
+    <td class="num">${nf(r.price,2)}</td>
+    <td class="num">${nf(r.yld,2)}</td>
+    <td class="l">${ratingCell(r, mode)}</td>
+    <td class="num">${r.list??"—"}</td>
+  </tr>`;
+}
+function fill(tbody, rows, mode, emptyText){
+  tbody.innerHTML = rows.length ? sortRows(rows).map(r => rowHtml(r, mode)).join("") : `<tr><td colspan="${COLS.length}" class="empty">${emptyText}</td></tr>`;
+}
+let last = {main:[], need:[], excl:[]};
+function render(){
+  syncControls();
+  last = split();
+  $$("tr.head").forEach(h => h.innerHTML = COLS.map(c => `<th data-k="${c.k}" class="${state.sort.key===c.k?"sorted":""}" scope="col">${c.t}${state.sort.key===c.k?(state.sort.dir>0?" ↑":" ↓"):""}</th>`).join(""));
+  fill($("#body"), last.main, "main", "За выбранный период нет выпусков, прошедших все правила. Расширьте период или заполните рейтинги в блоке «Нужен рейтинг».");
+  fill($("#needBody"), last.need, "need", "Все выпуски периода имеют рейтинг.");
+  fill($("#exclBody"), last.excl, "excl", "Исключённых выпусков нет.");
+  $("#needTitle").textContent = `Нужен рейтинг: ${last.need.length}`;
+  $("#needPanel").hidden = false;
+  $("#exclTitle").textContent = `Исключены: ${last.excl.length}`;
+  const vol = last.main.reduce((a,r)=>a+(r.volume||0),0);
+  const corp = last.main.filter(r=>r.type!=="gov").length;
+  $("#summary").innerHTML = [
+    ["Выпусков в таблице", last.main.length, ""],
+    ["Объём, млрд ₽", bn(vol), ""],
+    ["Корпоративных и регион.", corp, ""],
+    ["Без рейтинга", last.need.length, last.need.length?"alarm":""],
+    ["Исключено", last.excl.length, ""]
+  ].map(([l,v,c]) => `<div class="kpi ${c}"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
+  $("#rules").textContent = `Период размещения ${fmtD(prefs.from)} – ${fmtD(prefs.to)} (доступно с ${fmtD(WIN_START)}). Объём ≥ 1 млрд ₽, срок от размещения до погашения не меньше ${MIN_TERM_MONTHS} мес., минимальный рейтинг среди АКРА, Эксперт РА, НКР, НРА — ${prefs.minGrade==="AA"?"AA и выше":"AA− и выше"}. Без структурных, субординированных, ЦФА, ИОС Сбербанка, ипотечных ценных бумаг и секьюритизации (кроме СФО СБ Секьюритизация).`;
+  $("#export").disabled = !last.main.length || typeof XLSX==="undefined";
+}
+function syncControls(){
+  for(const k of ["from","to"]){ const el=$("#"+k); el.min = WIN_START; el.max = todayIso(); if(document.activeElement!==el) el.value = prefs[k]; }
+  $("#minGrade").value = prefs.minGrade;
+  const q = prefs.from===isoLocal(new Date(Date.now()-7*864e5)) ? "7" : prefs.from===monthsAgo(1) ? "1m" : prefs.from===WIN_START ? "3m" : "";
+  $$("#quick .chip").forEach(b => b.setAttribute("aria-pressed", b.dataset.q===q && prefs.to===todayIso()));
+}
+const savePrefs = () => store.set("placementPrefs", prefs);
+const esc = s => String(s??"").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
+function showBanner(html, kind){ const b=$("#banner"); b.innerHTML=html; b.className="banner"+(kind==="err"?" err":kind==="ok"?" okb":""); b.hidden=false; }
+function hideBanner(){ $("#banner").hidden=true; }
+function setProgress(p){ const el=$("#prog"); if(p==null){ el.hidden=true; return; } el.hidden=false; el.firstElementChild.style.width=(p*100)+"%"; }
+const clampDate = v => !v ? null : v < WIN_START ? WIN_START : v > todayIso() ? todayIso() : v;
+
+/* ---------- Excel ---------- */
+function exportXlsx(){
+  const rows = sortRows([...last.main]);
+  const head = ["Выпуск","ISIN","Эмитент","ИНН эмитента","Тип","Дата размещения","Дата погашения","Оферта","Объём выпуска, млрд ₽","Купон, %","Цена, %","Доходность, %","Мин. рейтинг","Источник мин. рейтинга",...AGENCIES,"Smart-Lab (агрегатор)","Уровень листинга","Для квал. инвесторов"];
+  const data = rows.map(r => {
+    const all = ratingsFor(r.isin);
+    const iss = issuerOf(r.isin);
+    return [r.name, r.isin, iss?.name || r.full, iss?.inn || "", TYPE_LABEL[r.type], r.placed, r.mat||"бессрочная", r.offer && (!r.mat||r.offer<r.mat) ? r.offer : "",
+      r.volume!=null ? +(r.volume/1e9).toFixed(3) : "", r.cpn ?? "", r.price ?? "", r.yld ?? "",
+      r.g?.label || "", r.g?.by || "", ...AGENCIES.map(a => [all[a] ? all[a] : "", all[a+", выпуск"] ? all[a+", выпуск"]+" (выпуск)" : ""].filter(Boolean).join("; ")), all["Smart-Lab"] || "", r.list ?? "", r.qual ? "да" : "нет"];
+  });
+  const ws = XLSX.utils.aoa_to_sheet([head, ...data]);
+  ws["!cols"] = head.map((h,i) => ({wch: i===2 ? 44 : Math.max(10, h.length+2)}));
+  ws["!autofilter"] = {ref: XLSX.utils.encode_range({s:{r:0,c:0}, e:{r:data.length, c:head.length-1}})};
+  const params = XLSX.utils.aoa_to_sheet([
+    ["Параметр","Значение"],
+    ["Период размещения", `${fmtD(prefs.from)} – ${fmtD(prefs.to)}`],
+    ["Минимальный объём выпуска","1 млрд ₽"],
+    ["Минимальный рейтинг эмитента", (prefs.minGrade==="AA"?"AA":"AA−")+" (минимальный из АКРА, Эксперт РА, НКР, НРА, нац. шкала)"],
+    ["Рейтинги собраны", issuerDb.updated ? new Date(issuerDb.updated).toLocaleString("ru-RU") : "—"],
+    ["Срок обращения (от размещения до погашения)","не меньше " + MIN_TERM_MONTHS + " мес."],
+    ["Исключены","структурные, субординированные, ЦФА, ИОС Сбербанка, ипотечные ценные бумаги, секьюритизация (кроме СФО СБ Секьюритизация), номинал не в рублях"],
+    ["Выпусков без рейтинга (не включены)", last.need.length],
+    ["Источник","MOEX ISS, сформировано " + new Date().toLocaleString("ru-RU")],
+    ...(state.demo ? [["ВНИМАНИЕ","демо-данные, не реальные выпуски"]] : [])
+  ]);
+  params["!cols"] = [{wch:36},{wch:70}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Размещения");
+  XLSX.utils.book_append_sheet(wb, params, "Параметры");
+  XLSX.writeFile(wb, `razmeshcheniya_${prefs.from}_${prefs.to}.xlsx`);
+}
+
+/* ---------- ratings import / export ---------- */
+function normAgency(h){
+  const s = String(h||"").toLowerCase();
+  if(/акра|acra/.test(s)) return "АКРА";
+  if(/эксперт|raex|expert|эра/.test(s)) return "Эксперт РА";
+  if(/нкр|nkr/.test(s)) return "НКР";
+  if(/нра|nra|национальн/.test(s)) return "НРА";
+  return null;
+}
+async function importRatings(file){
+  const wb = XLSX.read(await file.arrayBuffer(), {type:"array"});
+  let added = 0, rowsSeen = 0;
+  for(const name of wb.SheetNames){
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, defval:""});
+    const hi = aoa.findIndex(r => r.some(c => /isin/i.test(String(c))));
+    if(hi<0) continue;
+    const head = aoa[hi], iIsin = head.findIndex(c => /isin/i.test(String(c)));
+    const agCols = head.map((h,i)=>[normAgency(h),i]).filter(([a])=>a);
+    const freeCols = head.map((h,i)=>[h,i]).filter(([h])=>/рейтинг|rating/i.test(String(h)) && !normAgency(h) && !/мин/i.test(String(h))).map(([,i])=>i);
+    for(const row of aoa.slice(hi+1)){
+      const isin = String(row[iIsin]||"").trim().toUpperCase(); if(!/^[A-Z]{2}[A-Z0-9]{10}$/.test(isin)) continue;
+      rowsSeen++;
+      const rec = {};
+      agCols.forEach(([a,i]) => { const v = String(row[i]||"").trim(); if(gradeOf(v)) rec[a] = v; });
+      freeCols.forEach(i => Object.assign(rec, parseRatingText(row[i])));
+      if(Object.keys(rec).length){ myRatings[isin] = {...(myRatings[isin]||{}), ...rec}; added++; }
+    }
+  }
+  store.set("placementRatings", myRatings);
+  showBanner(added ? `<b>Рейтинги загружены:</b> ${added} выпусков из ${rowsSeen} строк с ISIN.` : `<b>Рейтинги не найдены.</b> Нужен столбец ISIN и столбцы с названиями агентств (АКРА, Эксперт РА, НКР, НРА) или столбец «Рейтинг» со значениями вида AA(RU), ruAA+, AA.ru, AA|ru|.`, added ? "ok" : "err");
+  render();
+}
+function exportRatings(){
+  const all = {...repoRatings}; for(const k in myRatings) all[k] = {...(all[k]||{}), ...myRatings[k]};
+  const byIsin = Object.fromEntries(state.rows.map(r=>[r.isin,r]));
+  const aoa = [["ISIN","Выпуск",...AGENCIES,"Другое"], ...Object.keys(all).sort().map(i => [i, byIsin[i]?.name||"", ...AGENCIES.map(a=>all[i][a]||""), all[i]["Другое"]||""])];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "Рейтинги");
+  XLSX.writeFile(wb, `reytingi_${todayIso()}.xlsx`);
+}
+
+/* ---------- demo ---------- */
+function demoRows(){
+  const add = n => isoLocal(new Date(Date.now()+n*864e5));
+  const mk = (id,name,full,type,placed,mat,vol,cpn,price,yld,list,extra={}) => Object.assign(
+    {id,board:type==="gov"?"TQOB":"TQCB",name,full,isin:"RU000DEMO"+id.slice(-3),emitter:"",type,placed:add(placed),mat:add(mat),offer:null,volume:vol,face:1000,cpn,price,yld,list,qual:false,hard:[]}, extra);
+  const rows = [
+    mk("D001","ДЕМО ОФЗ 26250","Демо ОФЗ-ПД 26250","gov",-12,2900,90e9,12.5,92.1,15.1,1),
+    mk("D002","ДЕМО Энерго 1Р4","Демо Энерго ПАО БО-001Р-04","corp",-20,1080,15e9,17.8,100.4,18.3,1),
+    mk("D003","ДЕМО Лизинг 2Р1","Демо Лизинг АО БО-002Р-01","corp",-34,720,5e9,19.5,100.1,20.9,1),
+    mk("D004","ДЕМО Обл-35003","Демо Область 35003","sub",-48,1460,10e9,16.2,99.6,17.4,1),
+    mk("D005","ДЕМО Девелоп 1Р2","Демо Девелопмент ПАО 001Р-02","corp",-55,900,3e9,21.0,99.8,23.1,2),
+    mk("D006","ДЕМО Ритейл 3Р","Демо Ритейл ООО 003Р-01","corp",-61,1095,0.6e9,20.0,100.0,21.8,3,{hard:["объём 0,6 млрд ₽ — меньше 1 млрд"]}),
+    mk("D007","ДЕМО Банк СУБ","Демо Банк ПАО суборд.","corp",-70,3650,8e9,16.0,98.0,17.0,1,{hard:["субординированная"]}),
+    mk("D008","ДЕМО Металл 1Р6","Демо Металлургия ПАО 001Р-06","corp",-79,1200,20e9,16.9,100.6,17.6,1)
+  ];
+  const demoR = {"RU000DEMO002":{"АКРА":"AA(RU)","Эксперт РА":"ruAA+"},"RU000DEMO003":{"Эксперт РА":"ruAA-"},"RU000DEMO004":{"АКРА":"AA+(RU)"},"RU000DEMO008":{"АКРА":"AAA(RU)","НКР":"AAA.ru"}};
+  issuerDb = {byInn:{}, isinInn:{}, byIsin:{}, fallback:{}, updated:null, sources:{}};
+  Object.entries(demoR).forEach(([isin, rs], k) => { const inn = "770000000"+k; issuerDb.isinInn[isin] = inn; issuerDb.byInn[inn] = {name:"Демо-эмитент "+(k+1), ratings:Object.fromEntries(Object.entries(rs).map(([a,v])=>[a,{r:v}]))}; });
+  return rows;
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click", e => {
+  const th = e.target.closest("th[data-k]");
+  if(th){ const k=th.dataset.k; state.sort = {key:k, dir: state.sort.key===k ? -state.sort.dir : (k==="name"?1:-1)}; render(); return; }
+  const b = e.target.closest("button"); if(!b) return;
+  if(b.dataset.q){ prefs.to = todayIso(); prefs.from = b.dataset.q==="7" ? isoLocal(new Date(Date.now()-7*864e5)) : b.dataset.q==="1m" ? monthsAgo(1) : WIN_START; savePrefs(); render(); }
+  else if(b.id==="reload") loadAll();
+  else if(b.id==="export") exportXlsx();
+  else if(b.id==="rexport") exportRatings();
+});
+for(const k of ["from","to"]) $("#"+k).addEventListener("change", e => {
+  const v = clampDate(e.target.value); if(!v) return;
+  prefs[k] = v; if(prefs.from > prefs.to){ if(k==="from") prefs.to = v; else prefs.from = v; }
+  savePrefs(); render();
+});
+$("#minGrade").addEventListener("change", e => { prefs.minGrade = e.target.value; savePrefs(); render(); });
+document.addEventListener("change", e => {
+  if(e.target.classList.contains("rin")){
+    const isin = e.target.dataset.isin, rec = parseRatingText(e.target.value);
+    if(Object.keys(rec).length) myRatings[isin] = rec; else delete myRatings[isin];
+    if(!e.target.value.trim()) myRatings[isin] = Object.fromEntries(Object.keys({...issuerRatings(isin), ...issueRatings(isin), ...(repoRatings[isin]||{})}).map(a=>[a,""]));
+    store.set("placementRatings", myRatings); render();
+  }
+});
+$("#rfile").addEventListener("change", e => { const f = e.target.files[0]; if(f) importRatings(f).catch(err => showBanner(`<b>Не удалось прочитать файл:</b> ${esc(err.message)}`, "err")); e.target.value = ""; });
+// keep stored period inside the 3-month window
+prefs.from = clampDate(prefs.from) || WIN_START; prefs.to = clampDate(prefs.to) || todayIso();
+render(); loadAll();
+</script>
+
+</body></html>
