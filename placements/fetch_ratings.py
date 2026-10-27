@@ -59,12 +59,13 @@ class Http:
             handlers.append(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         self.op = urllib.request.build_opener(*handlers)
 
-    def get(self, url: str, data: bytes | None = None, headers: dict | None = None, enc: str | None = None) -> str:
+    def get(self, url: str, data: bytes | None = None, headers: dict | None = None, enc: str | None = None,
+            tries: int = 3, timeout: int = 25) -> str:
         last = None
-        for attempt in range(3):
+        for attempt in range(tries):
             try:
                 req = urllib.request.Request(url, data=data, headers={"User-Agent": UA, **(headers or {})})
-                with self.op.open(req, timeout=25) as r:
+                with self.op.open(req, timeout=timeout) as r:
                     body = r.read()
                     cs = enc or r.headers.get_content_charset() or "utf-8"
                 time.sleep(PAUSE)
@@ -391,7 +392,7 @@ def fetch_moex_issuers():
     start = 0
     while True:
         j = json.loads(h.get("https://iss.moex.com/iss/securities.json?engine=stock&market=bonds&is_trading=1"
-                             f"&iss.meta=off&limit=100&start={start}"))["securities"]
+                             f"&iss.meta=off&limit=100&start={start}", tries=6, timeout=60))["securities"]
         if not j["data"]:
             break
         c = {k: i for i, k in enumerate(j["columns"])}
@@ -506,7 +507,8 @@ def recent_unrated(isin_inn: dict, by_inn: dict, by_isin: dict, days: int = 100)
     """Рублёвые выпуски от 1 млрд, размещённые за последние `days` дней, без рейтинга эмитента и выпуска."""
     h = Http()
     j = json.loads(h.get("https://iss.moex.com/iss/engines/stock/markets/bonds/securities.json"
-                         "?iss.only=securities&iss.meta=off&securities.columns=SECID,ISIN,FACEUNIT,FACEVALUE,ISSUESIZE,BOARDID"))
+                         "?iss.only=securities&iss.meta=off&securities.columns=SECID,ISIN,FACEUNIT,FACEVALUE,ISSUESIZE,BOARDID",
+                         tries=6, timeout=60))
     j = j["securities"]
     c = {k: i for i, k in enumerate(j["columns"])}
     cand, seen = [], set()
@@ -547,7 +549,15 @@ def main() -> int:
             aliases = {k: v for k, v in json.load(f).items() if not k.startswith("_")}
     cache = prev.get("inn_cache", {})
 
-    isin_inn, inn_title, short = fetch_moex_issuers()
+    try:
+        isin_inn, inn_title, short = fetch_moex_issuers()
+    except Exception as e:  # noqa: BLE001
+        if not prev.get("isin_inn"):
+            raise
+        log("MOEX: ОШИБКА", e, "— беру список эмитентов из прошлого запуска")
+        isin_inn = prev["isin_inn"]
+        inn_title = {inn: rec.get("name", "") for inn, rec in prev.get("by_inn", {}).items()}
+        short = {}
     match = build_matcher(inn_title, aliases, short)
 
     agencies = {
