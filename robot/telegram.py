@@ -6,7 +6,8 @@ python3 -m robot.telegram --run run.log --status status.json --exit-code 0 [--su
 (opened / added / closed with P&L, marked when a stop fired), taken from the broker, plus one per
 stop order the robot placed, moved or cancelled in this run. The cursor and the last known
 positions live in state/notify.json.
-Then one summary message on any problem, or always with --summary (end-of-day report).
+Then one summary message on any problem, or always with --summary (end-of-day report; in live mode it
+also shows the portfolio value and TWR/MWR since [robot].started, see robot/performance.py).
 Needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID; without them messages are only printed.
 """
 from __future__ import annotations
@@ -150,7 +151,7 @@ def unprotected(status: dict) -> bool:
 
 
 def build(run_text: str, status: dict | None, exit_code: int, summary: bool, url: str = "",
-          problems: list[str] = ()) -> str | None:
+          problems: list[str] = (), extra: list[str] = ()) -> str | None:
     events = parse_run(run_text)
     kinds = {e for e, _ in events}
     alert = bool(kinds & ALERT) or exit_code != 0 or status is None or unprotected(status) or bool(problems)
@@ -172,6 +173,9 @@ def build(run_text: str, status: dict | None, exit_code: int, summary: bool, url
             lines.append("• Есть позиция без стопа!")
         lines.append("")
         lines += format_status(status)
+    if extra:
+        lines.append("")
+        lines += extra
     if url:
         lines.append(url)
     return "\n".join(lines)[:4000]
@@ -206,6 +210,15 @@ def fetch_trades(cfg, since: datetime, now: datetime) -> list[dict]:
                        "by_stop": any(u == inst.uid and d == kind and abs((t - at).total_seconds()) < 120
                                       for u, d, at in fired)})
     return sorted(trades, key=lambda x: x["t"])
+
+
+def portfolio_lines(cfg) -> list[str]:
+    from . import performance
+    from .engine import Engine
+
+    eng = Engine(cfg, read_only=True)
+    start = datetime.fromisoformat(cfg.started.replace("Z", "+00:00"))
+    return performance.format_report(performance.compute(eng.c, cfg.account_id, start))
 
 
 def send(token: str, chat_id: str, text: str) -> None:
@@ -262,7 +275,13 @@ def main(argv: list[str] | None = None) -> int:
             problems.append(f"Не удалось получить сделки: {type(e).__name__}: {e}")
         messages += order_messages(events)
 
-    summary = build(run_text, status, a.exit_code, a.summary, a.url, problems)
+    extra = []
+    if a.summary and cfg.started and cfg.mode == "live":
+        try:
+            extra = portfolio_lines(cfg)
+        except Exception as e:  # returns are informational: never block the summary
+            extra = [f"Доходность посчитать не удалось: {type(e).__name__}: {e}"]
+    summary = build(run_text, status, a.exit_code, a.summary, a.url, problems, extra)
     if summary:
         messages.append(summary)
     if not messages:

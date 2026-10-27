@@ -91,6 +91,50 @@ class ClientRetryTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)
 
 
+class PerformanceTest(unittest.TestCase):
+    def test_twr_and_mwr_around_a_deposit(self):
+        from robot import performance
+
+        T = lambda d: (datetime(2026, 10, 16, 12, tzinfo=timezone.utc) + timedelta(days=d)).isoformat()
+        rub = lambda x: {"units": str(int(x)), "nano": int(round((x - int(x)) * 1e9))}
+        # start: 5 000 cash; +10% on a futures trade by day 7; deposit 995 000; buy the fund;
+        # +1% on everything by day 11
+        ops = [
+            {"date": T(1), "type": "OPERATION_TYPE_SELL", "instrumentType": "futures", "payment": rub(12_000)},
+            {"date": T(6), "type": "OPERATION_TYPE_ACCRUING_VARMARGIN", "instrumentType": "", "payment": rub(500)},
+            {"date": T(7), "type": "OPERATION_TYPE_INPUT", "instrumentType": "", "payment": rub(995_000)},
+            {"date": T(7.1), "type": "OPERATION_TYPE_BUY", "instrumentType": "etf", "instrumentUid": "fund",
+             "payment": rub(-1_000_000), "quantityDone": "1000000"},
+            {"date": T(7.1), "type": "OPERATION_TYPE_BROKER_FEE", "instrumentType": "etf",
+             "instrumentUid": "fund", "payment": rub(-500)},
+            {"date": T(10), "type": "OPERATION_TYPE_ACCRUING_VARMARGIN", "instrumentType": "", "payment": rub(5_000)},
+        ]
+        # cash now = 5000 + 500 + 995000 - 1000000 - 500 + 5000 = 5000; fund 1M units at 1.0055
+        pf = {"positions": [
+            {"instrumentType": "currency", "ticker": "RUB000UTSTOM", "quantity": rub(5_000)},
+            {"instrumentType": "etf", "instrumentUid": "fund", "ticker": "LQDT", "quantity": rub(1_000_000),
+             "currentPrice": rub(1.0055)}]}
+
+        class C:
+            def call(self, method, body=None):
+                if method == "OperationsService/GetPortfolio":
+                    return pf
+                return {"items": ops, "hasNext": False}
+
+        now = datetime.fromisoformat(T(11))
+        r = performance.compute(C(), "acc", datetime.fromisoformat(T(0)), now, price_at=lambda u, t: 1.0)
+        self.assertAlmostEqual(r.start_value, 5_000)
+        self.assertAlmostEqual(r.value, 1_010_500)
+        self.assertAlmostEqual(r.pnl, 1_010_500 - 5_000 - 995_000)
+        # sub-periods: 5000 -> 5500 (+10%), then 1 000 500 -> 1 010 500 (+1%)
+        self.assertAlmostEqual(r.twr, 1.10 * 1_010_500 / 1_000_500 - 1, places=6)
+        # MWR ~ gain / average capital: 10 500 / (5 000 + 995 000 * 4/11) = 2.86% (modified Dietz)
+        self.assertAlmostEqual(r.mwr, 10_500 / (5_000 + 995_000 * 4 / 11), delta=0.001)
+        lines = performance.format_report(r)
+        self.assertIn("💼 Портфель: 1 010 500 ₽ (деньги 5 000 ₽, LQDT 1 005 500 ₽)", lines[0])
+        self.assertIn("TWR +11,10%", lines[1])
+
+
 class RiskTest(unittest.TestCase):
     def test_size_by_risk_and_margin(self):
         cfg = RiskConfig(capital_rub=5000, risk_per_trade=0.01, max_risk_per_trade=0.03, max_margin_share=0.6, fee_rate=0)
