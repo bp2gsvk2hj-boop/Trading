@@ -1,40 +1,46 @@
-import sys, json, re, time, datetime as dt
-from concurrent.futures import ThreadPoolExecutor
+import sys, json, re, time
 sys.path.insert(0, "placements"); import fetch_ratings as f
-h = f.Http(); ISS = "https://iss.moex.com/iss"
-R = json.load(open("placements/ratings.json", encoding="utf-8"))
-start = (dt.date.today() - dt.timedelta(days=92)).isoformat()
-j = json.loads(h.get(f"{ISS}/engines/stock/markets/bonds/securities.json?iss.only=securities&iss.meta=off"))["securities"]
-c = {k:i for i,k in enumerate(j["columns"])}
-secs = {}
-for r in j["data"]:
-    secs.setdefault(r[c["SECID"]], r)
-cand = [r for r in secs.values() if (r[c["FACEUNIT"]] in ("SUR","RUB",None)) and (r[c["ISSUESIZE"]] or 0)*(r[c["FACEVALUE"]] or 0) >= 1e9 and (not r[c["MATDATE"]] or r[c["MATDATE"]] >= dt.date.today().isoformat())]
-def desc(r):
+out = []
+def P(*a): out.append(" ".join(map(str,a)))
+# 1. ACRA: emission rows in list
+h = f.Http(f.acra_ssl_context()); url = f.ACRA + "/local/ajax/get_rate_person.php"
+hdr = {"X-Requested-With":"XMLHttpRequest","Referer":f.ACRA+"/ratings/issuers/","Content-Type":"application/json"}
+for t in ["ИКС 5", "ВТБ РКС", "Евраз", "Ростовская"]:
     try:
-        d = json.loads(h.get(f"{ISS}/securities/{r[c['SECID']]}.json?iss.only=description&iss.meta=off&description.columns=name,value"))["description"]["data"]
-        return {k:v for k,v in d}
-    except Exception: return {}
-with ThreadPoolExecutor(8) as ex: ds = list(ex.map(desc, cand))
-rows = []
-for r, d in zip(cand, ds):
-    if d.get("ISSUEDATE","") >= start:
-        isin = r[c["ISIN"]]; inn = R["isin_inn"].get(isin, "")
-        rows.append({"isin": isin, "short": r[c["SHORTNAME"]], "issued": d.get("ISSUEDATE"), "inn": inn,
-                     "issuer": (R["by_inn"].get(inn) or {}).get("name") or d.get("EMITTER_ID",""),
-                     "rated": bool(inn and R["by_inn"].get(inn)), "type": d.get("TYPENAME","") + " " + d.get("TYPE","")})
-# issuer names for unrated via q
-for x in rows:
-    if not x["rated"]:
-        try:
-            q = json.loads(h.get(f"{ISS}/securities.json?q={x['isin']}&iss.meta=off&securities.columns=isin,emitent_title,emitent_inn"))["securities"]["data"]
-            for a,b,i in q:
-                if a == x["isin"]: x["issuer"], x["inn"] = b, i
-        except Exception: pass
-un = [x for x in rows if not x["rated"]]
-out = [f"window from {start}: bonds {len(rows)}, rated {len(rows)-len(un)}, unrated {len(un)}"]
-from collections import Counter
-iss = Counter((x["issuer"], x["inn"]) for x in un)
-out.append(f"unrated issuers: {len(iss)}")
-for (n, i), k in iss.most_common(): out.append(f"{k:3d} | {i} | {n} | {[x['short'] for x in un if x['inn']==i][:3]} | {un[[x['inn'] for x in un].index(i)]['type']}")
-open("placements/run.log","w").write("\n".join(out)); print("\n".join(out[:5]))
+        d = json.loads(h.get(url, json.dumps({"searchType":"emits","text":t,"page":0,"count":50}).encode(), hdr))["data"]
+        for it in d["items"]:
+            for inf in it.get("info",[]):
+                rt = inf.get("rate",{}).get("value",{}) or {}; em = inf.get("emission",{}).get("value",{}) or {}
+                P("ACRA", t, "|", it["title"], "|", rt.get("title"), rt.get("rating_scale"), "| em:", em.get("isin"), em.get("title"), em.get("code"))
+    except Exception as e: P("ACRA", t, "ERR", e)
+    time.sleep(1)
+for st in ["securities", "emissions", "emission"]:
+    try:
+        d = json.loads(h.get(url, json.dumps({"searchType":st,"text":"","page":0,"count":10}).encode(), hdr))
+        P("ACRA searchType", st, "total", d.get("data",{}).get("total"), json.dumps(d)[:600])
+    except Exception as e: P("ACRA searchType", st, "ERR", e)
+    time.sleep(1)
+# 2. Expert RA debt instruments & securitization lists
+r = f.Http(cookies=True)
+for lst in ["debt_inst_all", "securitization_credit_all", "securitization_all", "regioncredit_all"]:
+    try:
+        p = r.get(f"https://raexpert.ru/ratings/{lst}/") or ""
+        rows = re.findall(r"<tr>(.*?)</tr>", p, re.S)
+        P("RA", lst, "rows", len(rows), "paginator", len(re.findall(r"b-paginator__link", p)))
+        for tr in rows[1:4]: P("   ", f.text(tr)[:220], re.findall(r'href="(/[^"]+)"', tr)[:2])
+    except Exception as e: P("RA", lst, "ERR", e)
+# 3. NKR issue ratings page?
+n = f.Http()
+for u in ["https://www.ratings.ru/ratings/issues/", "https://www.ratings.ru/ratings/issuers/VTB/"]:
+    try:
+        p = n.get(u) or ""
+        P("NKR", u, len(p), [f.text(x)[:150] for x in re.findall(r"<tr[^>]*>(.*?)</tr>", p, re.S)[1:4]], re.findall(r"RU000[A-Z0-9]{7}", p)[:5])
+    except Exception as e: P("NKR", u, "ERR", e)
+# 4. smart-lab bond page
+s = f.Http()
+for isin in ["RU000A10C8H9", "RU000A1068X9"]:
+    try:
+        p = s.get(f"https://smart-lab.ru/q/bonds/{isin}/") or ""
+        i = p.find("ейтинг"); P("SMARTLAB", isin, len(p), f.text(p[i-300:i+700])[:500] if i > 0 else "no rating text")
+    except Exception as e: P("SMARTLAB", isin, "ERR", e)
+open("placements/run.log","w").write("\n".join(out))
