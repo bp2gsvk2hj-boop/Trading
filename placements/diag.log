@@ -1,0 +1,13 @@
+== https://iss.moex.com/iss/engines/stock/markets/bonds/securities.json?iss.only=securities&iss.meta=off&securities.columns=SECID
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: X-MicexPassport-Marker
+Access-Control-Allow-Origin: null
+== https://iss.moex.com/iss/securities/RU000A10G1R9.json?iss.only=description&iss.meta=off
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: X-MicexPassport-Marker
+Access-Control-Allow-Origin: null
+== https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/placements/ratings.json
+HTTP/2 200 
+access-control-allow-origin: *
