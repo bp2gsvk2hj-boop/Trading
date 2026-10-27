@@ -4,12 +4,14 @@ permissions: { contents: write }
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: python3 .probe/diag.py; true
+      - run: |
+          mkdir -p placements
+          for u in "https://iss.moex.com/iss/engines/stock/markets/bonds/securities.json?iss.only=securities&iss.meta=off&securities.columns=SECID" "https://iss.moex.com/iss/securities/RU000A10G1R9.json?iss.only=description&iss.meta=off" "https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/placements/ratings.json"; do
+            echo "== $u" >> placements/diag.log
+            curl -sS -o /dev/null -D - -H "Origin: null" "$u" | grep -i -E "^HTTP|access-control" >> placements/diag.log || true
+          done
       - run: |
           git config user.name probe && git config user.email probe@users.noreply.github.com
-          git add -f placements/diag.log && git commit -m "probe results F1 [skip ci]" && git push -f origin HEAD:refs/heads/probe-out
+          git add -f placements/diag.log && git commit -m "probe results G1 [skip ci]" && git push -f origin HEAD:refs/heads/probe-out
