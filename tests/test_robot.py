@@ -71,6 +71,26 @@ class QuotationTest(unittest.TestCase):
         self.assertEqual(f2q(-3.25), {"units": "-3", "nano": -250000000})
 
 
+class ClientRetryTest(unittest.TestCase):
+    def test_retries_dropped_connection(self):
+        import http.client
+        import io
+        from robot.api import Client
+        c = Client(token="x", retries=2)
+        calls = []
+
+        def opener(req, timeout):
+            calls.append(1)
+            if len(calls) == 1:
+                raise http.client.IncompleteRead(b"partial", 100)
+            return io.BytesIO(b'{"ok": 1}')
+
+        c._opener = unittest.mock.Mock(open=opener)
+        with unittest.mock.patch("robot.api.time.sleep"):
+            self.assertEqual(c.call("X/Y"), {"ok": 1})
+        self.assertEqual(len(calls), 2)
+
+
 class RiskTest(unittest.TestCase):
     def test_size_by_risk_and_margin(self):
         cfg = RiskConfig(capital_rub=5000, risk_per_trade=0.01, max_risk_per_trade=0.03, max_margin_share=0.6, fee_rate=0)
