@@ -43,6 +43,7 @@ class Config:
     slots: list[Slot]
     path: Path
     name: str = "Торговый робот"
+    started: str = ""           # ISO time the robot started on the account: returns are counted from it
     collateral: CollateralCfg = field(default_factory=CollateralCfg)
 
 
@@ -73,5 +74,6 @@ def load(path: str | Path = ROOT / "robot.toml") -> Config:
         slots=[_pick(Slot, s) for s in raw.get("slots", [])],
         path=path,
         name=str(r.get("name", "Торговый робот")),
+        started=str(r.get("started", "")),
         collateral=_pick(CollateralCfg, raw.get("collateral", {})),
     )

@@ -8,6 +8,8 @@ name = "Торговый робот Тбанк"
 mode = "live"
 account_id = "2000062287"
 state_dir = "state"
+# first robot trade on this account (UTC): portfolio returns (TWR/MWR) in Telegram are counted from here
+started = "2026-10-16T13:30:00Z"
 
 [collateral]
 # Idle cash goes into LQDT (money-market fund, ~key rate). T-Bank blocks futures GO in rubles:
