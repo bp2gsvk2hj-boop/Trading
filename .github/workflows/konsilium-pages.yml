@@ -1,11 +1,11 @@
-name: Publish Pages (Konsilium + bonds)
+name: Publish Pages (Konsilium + bonds + placements)
 
-# Publishes konsilium/ at the site root and bonds/ at /bonds/.
+# Publishes konsilium/ at the site root, bonds/ at /bonds/ and placements/ at /placements/.
 # The trading robot code is not part of the site.
 on:
   push:
     branches: [main]
-    paths: ["konsilium/**", "bonds/**", ".github/workflows/konsilium-pages.yml"]
+    paths: ["konsilium/**", "bonds/**", "placements/**", ".github/workflows/konsilium-pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -32,6 +32,8 @@ jobs:
           cp -r konsilium/. _site/
           mkdir -p _site/bonds
           cp -r bonds/. _site/bonds/
+          mkdir -p _site/placements
+          cp -r placements/. _site/placements/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
