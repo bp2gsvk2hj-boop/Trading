@@ -10,7 +10,7 @@ on:
       command:
         description: "Robot command"
         type: choice
-        options: [run, status, flatten]
+        options: [run, status, flatten, resize]
         default: run
 
 concurrency:

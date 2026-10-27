@@ -177,11 +177,19 @@ class Engine:
         if isinstance(self.broker, PaperBroker):
             self.broker.fund_fee = cc.fee_rate
         cash, units, px = self._fund_state()
-        equity = cash + units * px
-        go = self._go_in_use()
-        if px <= 0 or (go <= cash <= go + cc.cash_max * equity):
+        if px <= 0:
             return
-        amount = cash - go - cc.cash_target * equity     # > 0: buy the fund, < 0: sell it
+        fund = units * px
+        go = self._go_in_use()
+        # The robot manages at most [risk].capital_rub; money above it stays in rubles (e.g. to withdraw).
+        equity = min(cash + fund, self.cfg.risk.capital_rub)
+        target = equity * (1 - cc.cash_target) - go       # fund value that leaves GO + cash_target in cash
+        if cash < go or fund > equity - go:
+            amount = min(target - fund, cash - go)       # sell (< 0)
+        elif fund < equity * (1 - cc.cash_max) - go:
+            amount = target - fund                       # buy (> 0)
+        else:
+            return
         side = 1 if amount > 0 else -1
         qty = math.floor(amount / px) if side > 0 else min(int(units), math.ceil(-amount / px))
         if qty <= 0:
@@ -375,6 +383,58 @@ class Engine:
             self.log("rolled", frm=old.ticker, to=front.ticker, side=side, qty=abs(h.qty))
 
     # ---- manual controls ---------------------------------------------------
+    def resize(self, now: datetime | None = None) -> list[str]:
+        """Cut open positions down to what the risk rules allow for the current capital (after
+        lowering [risk].capital_rub): size from the last price to the current stop, as for a new
+        entry. The exchange stop is replaced for the remaining quantity. Then rebalance the fund."""
+        now = now or datetime.now(timezone.utc)
+        if self.cfg.collateral.enabled:
+            cash, units, px = self._fund_state()
+            capital = cash + units * px
+        else:
+            capital = self.broker.free_money() + sum(
+                abs(self.broker.holding(i).qty) * i.go for i in (self.inst(s.ticker) for s in self.cfg.slots))
+        risk = replace(self.cfg.risk, capital_rub=min(self.cfg.risk.capital_rub, capital))
+        margin = 0.0
+        for slot in [s for s in self.cfg.slots if s.enabled]:
+            inst = self.inst(slot.ticker)
+            h = self.broker.holding(inst)
+            if not h.qty:
+                continue
+            side = (h.qty > 0) - (h.qty < 0)
+            key = f"{slot.ticker}:{slot.strategy}:{slot.interval}"
+            sst = self.state["slots"].setdefault(key, {"strategy": {}})
+            prot = [s for s in self.broker.stops(inst) if s.side == -side]
+            stop = prot[0].price if prot else sst.get("stop")
+            if stop is None:
+                self.log("warn", ticker=inst.ticker, why="no stop to size against, not resized")
+                continue
+            last = q2f(self.c.call("MarketDataService/GetLastPrices",
+                                   {"instrumentId": [inst.uid]})["lastPrices"][0]["price"])
+            want, note = size(inst, last, stop, replace(risk, fee_rate=slot.fee_rate or risk.fee_rate), margin)
+            want = min(want, abs(h.qty))
+            if want == abs(h.qty):
+                margin += want * inst.go
+                continue
+            if not self.market_open(inst):
+                self.log("warn", ticker=inst.ticker, why="market closed, not resized")
+                margin += abs(h.qty) * inst.go
+                continue
+            for s in self.broker.stops(inst):
+                self._cancel(inst, s.id, "resize")
+            tag = (self.cfg.account_id or "paper", inst.uid, now.isoformat())
+            self._market(inst, -side, abs(h.qty) - want, order_key(*tag, "resize"),
+                         f"resize to {want} for capital {risk.capital_rub:.0f} ({note})")
+            if want:
+                self._stop(inst, -side, want, stop, order_key(*tag, "resize_stop"))
+                margin += want * inst.go
+            else:
+                sst.update(side=0, stop=None, entry_time=None)
+        if self.cfg.collateral.enabled:
+            self._rebalance(now)
+        self.save()
+        return self.notes
+
     def flatten(self, why: str = "manual flatten") -> list[str]:
         for slot in self.cfg.slots:
             inst = self.inst(slot.ticker)
