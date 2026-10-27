@@ -100,7 +100,7 @@ tbody tr:hover td{background:var(--soft)}
   <header>
     <div>
       <h1>Новые размещения облигаций</h1>
-      <p class="sub">Рублёвые выпуски российских эмитентов, размещённые за последние 3 месяца · объём от 1 млрд ₽ · рейтинг не ниже AA · данные MOEX ISS</p>
+      <p class="sub">Рублёвые выпуски российских эмитентов, размещённые за последние 3 месяца · объём от 1 млрд ₽ · рейтинг эмитента не ниже AA · данные MOEX ISS, АКРА, Эксперт РА, НКР, НРА</p>
     </div>
     <div class="actions">
       <button class="btn ghost" id="reload">Обновить</button>
@@ -132,7 +132,7 @@ tbody tr:hover td{background:var(--soft)}
 
   <section class="panel need" id="needPanel">
     <h2 id="needTitle">Нужен рейтинг</h2>
-    <p>Выпуски прошли по дате, объёму и типу, но рейтингов по ним в приложении нет. Впишите рейтинги в поле через запятую в формате агентства: <b>AA(RU)</b> — АКРА, <b>ruAA+</b> — Эксперт РА, <b>AA.ru</b> — НКР, <b>AA|ru|</b> — НРА. Берётся минимальный. Можно загрузить файл целиком: кнопка ниже.</p>
+    <p>Выпуски прошли по дате, объёму и типу, но у эмитента не найден рейтинг ни одного из четырёх агентств: либо его нет, либо название у агентства не совпало с названием на бирже. Проверьте эмитента и впишите рейтинги в поле через запятую в формате агентства: <b>AA(RU)</b> — АКРА, <b>ruAA+</b> — Эксперт РА, <b>AA.ru</b> — НКР, <b>AA|ru|</b> — НРА. Берётся минимальный. Можно загрузить файл целиком: кнопка ниже.</p>
     <div class="fg">
       <label class="btn ghost" for="rfile" style="cursor:pointer">Загрузить рейтинги (xlsx, csv)</label>
       <input type="file" id="rfile" class="vh" accept=".xlsx,.xls,.csv">
@@ -151,7 +151,7 @@ tbody tr:hover td{background:var(--soft)}
   <div class="notes">
     <div>Дата размещения — поле ISSUEDATE в описании выпуска на MOEX. Для выпусков через книгу заявок это день технического размещения, он же день его завершения.</div>
     <div>Объём выпуска — количество бумаг × первоначальный номинал. ОФЗ получают суверенный рейтинг AAA автоматически.</div>
-    <div>Кредитные рейтинги MOEX ISS бесплатно не отдаёт. Они берутся из файла <code>placements/ratings.json</code> в репозитории (общий для всех) и из того, что вы ввели или загрузили здесь (хранится в этом браузере). Ваши значения важнее файла.</div>
+    <div>Рейтинг — кредитный рейтинг эмитента по национальной шкале. Каждое утро GitHub Actions собирает их с сайтов АКРА, НКР, Эксперт РА и из базы Финмаркета (НРА) в <code>placements/ratings.json</code>. Эмитенты АКРА и НКР привязываются к бирже по ИНН, Эксперт РА и НРА — по названию; несовпавшие названия можно привязать вручную в <code>placements/rating_aliases.json</code>.</div><div>Рейтинги, введённые или загруженные здесь, хранятся в этом браузере и важнее собранных.</div>
     <div>В файле Excel — только итоговая таблица, рейтинги по каждому агентству в отдельных столбцах, и лист с параметрами отбора.</div>
   </div>
 </div>
@@ -204,9 +204,12 @@ function parseRatingText(text){   // "AA(RU), ruAA+" -> {АКРА:"AA(RU)", "Э�
   });
   return out;
 }
-let repoRatings = {};                          // from ratings.json
+let repoRatings = {};                          // ручные рейтинги выпусков из ratings.json (по ISIN)
+let issuerDb = {byInn:{}, isinInn:{}, updated:null, sources:{}};  // рейтинги эмитентов из ratings.json
+const issuerOf = isin => { const inn = state.innOf[isin]?.inn || issuerDb.isinInn[isin]; if(!inn) return null; const rec = issuerDb.byInn[inn]; return {inn, name: rec?.name || state.innOf[isin]?.title || "", ratings: rec?.ratings || {}}; };
+const issuerRatings = isin => { const x = issuerOf(isin), o = {}; if(x) for(const a in x.ratings) o[a] = x.ratings[a].r; return o; };
 let myRatings = store.get("placementRatings", {});  // {ISIN: {agency: raw}}
-const ratingsFor = isin => ({...(repoRatings[isin]||{}), ...(myRatings[isin]||{})});
+const ratingsFor = isin => ({...issuerRatings(isin), ...(repoRatings[isin]||{}), ...(myRatings[isin]||{})});
 function minRating(r){
   if(r.type==="gov") return {label:"AAA", rank:SCALE.indexOf("AAA")*3, by:"суверенный"};
   const all = ratingsFor(r.isin); let best = null;
@@ -218,7 +221,7 @@ const ratingText = isin => Object.values(ratingsFor(isin)).filter(Boolean).join(
 /* ---------- state ---------- */
 const prefs = Object.assign({from: WIN_START, to: todayIso(), minGrade:"AA"}, store.get("placementPrefs", {}));
 let descCache = store.get("placementDesc_v1", {});
-let state = {rows:[], demo:false, sort:{key:"placed", dir:-1}};
+let state = {rows:[], demo:false, sort:{key:"placed", dir:-1}, innOf:{}};
 
 async function getJ(url){
   const sep = url.includes("?") ? "&" : "?";
@@ -264,7 +267,10 @@ async function loadAll(){
   const btn = $("#reload"); btn.disabled = true; setProgress(0.05);
   const today = todayIso();
   try{
-    try{ const r = await fetch("ratings.json", {cache:"no-store"}); if(r.ok){ const j = await r.json(); repoRatings = j.ratings || {}; } }catch(e){}
+    for(const u of ["ratings.json", "https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/placements/ratings.json"]){
+      try{ const r = await fetch(u, {cache:"no-store"}); if(r.ok){ const j = await r.json();
+        if(!issuerDb.updated || (j.updated||"") > issuerDb.updated){ repoRatings = j.ratings || {}; issuerDb = {byInn:j.by_inn||{}, isinInn:j.isin_inn||{}, updated:j.updated||null, sources:j.sources||{}}; } } }catch(e){}
+    }
     const j = await getJ(`${ISS}/engines/stock/markets/bonds/securities.json?iss.only=securities,marketdata&marketdata.columns=SECID,BOARDID,LAST,WAPRICE,MARKETPRICETODAY,YIELD`);
     const md = {}; rowsOf(j.marketdata).forEach(m => md[m.SECID+"|"+m.BOARDID] = m);
     const bySec = {};
@@ -282,8 +288,19 @@ async function loadAll(){
       () => setProgress(0.12 + 0.88*(++step)/(need.length||1)));
     store.set("placementDesc_v1", descCache);
     state.rows = cand.map(s => build(s, md[s.SECID+"|"+s.BOARDID]||{}, descCache[s.SECID])).filter(r => r && r.placed && r.placed >= WIN_START && r.placed <= today);
-    state.demo = false; hideBanner();
-    $("#stamp").textContent = `Обновлено ${new Date().toLocaleString("ru-RU")} · выпусков, размещённых с ${fmtD(WIN_START)}: ${state.rows.length} · рейтинги из файла репозитория: ${Object.keys(repoRatings).length}, ваши: ${Object.keys(myRatings).length}`;
+    // ИНН эмитента: из ratings.json, а для свежих выпусков, которых там ещё нет, — запросом к MOEX
+    const noInn = state.rows.filter(r => r.isin && !issuerDb.isinInn[r.isin] && !descCache[r.id]?.inn);
+    await pool(noInn, 6, r => getJ(`${ISS}/securities.json?q=${r.isin}&iss.only=securities&securities.columns=isin,emitent_inn,emitent_title`)
+      .then(j => { const x = rowsOf(j.securities).find(y => y.isin===r.isin); if(x && x.emitent_inn) Object.assign(descCache[r.id], {inn:x.emitent_inn, en:x.emitent_title||""}); }));
+    store.set("placementDesc_v1", descCache);
+    state.rows.forEach(r => { const d = descCache[r.id]; if(d?.inn) state.innOf[r.isin] = {inn:d.inn, title:d.en}; });
+    const failed = Object.entries(issuerDb.sources).filter(([,v]) => !v.ok).map(([k]) => k);
+    state.demo = false;
+    if(!issuerDb.updated) showBanner(`<b>Рейтинги эмитентов ещё не собраны.</b> Файл ratings.json пуст — запустите в GitHub Actions задачу «Ratings for placements app» или дождитесь утреннего запуска. Пока рейтинги можно вписать вручную.`);
+    else if(failed.length) showBanner(`<b>Не обновились рейтинги: ${failed.map(esc).join(", ")}.</b> Для них используются данные прошлого сбора.`);
+    else hideBanner();
+    const ratedAt = issuerDb.updated ? new Date(issuerDb.updated).toLocaleString("ru-RU") : "нет";
+    $("#stamp").textContent = `Обновлено ${new Date().toLocaleString("ru-RU")} · выпусков, размещённых с ${fmtD(WIN_START)}: ${state.rows.length} · рейтинги эмитентов собраны: ${ratedAt} (${Object.keys(issuerDb.byInn).length} эмитентов) · ваших правок: ${Object.keys(myRatings).length}`;
   }catch(e){
     if(!state.rows.length || state.demo){
       state.rows = demoRows(); state.demo = true;
@@ -349,7 +366,7 @@ function rowHtml(r, mode){
   const offer = r.offer && (!r.mat || r.offer < r.mat) ? `<span class="days">оферта ${fmtD(r.offer)}</span>` : "";
   const why = mode==="excl" && r.reasons.length ? `<span class="why">${r.reasons.map(esc).join("; ")}</span>` : "";
   return `<tr>
-    <td><span class="name">${esc(r.name)}</span><span class="tag ${r.type==="gov"?"gov":""}">${TYPE_LABEL[r.type]}</span>${r.qual?`<span class="tag" title="Только для квалифицированных инвесторов">квал</span>`:""}<br><span class="isin">${esc(r.isin||r.id)} · ${esc(r.board)}</span><span class="full">${esc(r.full||"")}</span>${why}</td>
+    <td><span class="name">${esc(r.name)}</span><span class="tag ${r.type==="gov"?"gov":""}">${TYPE_LABEL[r.type]}</span>${r.qual?`<span class="tag" title="Только для квалифицированных инвесторов">квал</span>`:""}<br><span class="isin">${esc(r.isin||r.id)} · ${esc(r.board)}</span><span class="full">${esc(issuerOf(r.isin)?.name || r.full || "")}${issuerOf(r.isin)?` · ИНН ${esc(issuerOf(r.isin).inn)}`:""}</span>${why}</td>
     <td class="num">${fmtD(r.placed)}</td>
     <td class="num">${r.mat?fmtD(r.mat):"бессрочн."}${offer}</td>
     <td class="num">${bn(r.volume)}</td>
@@ -402,21 +419,23 @@ const clampDate = v => !v ? null : v < WIN_START ? WIN_START : v > todayIso() ? 
 /* ---------- Excel ---------- */
 function exportXlsx(){
   const rows = sortRows([...last.main]);
-  const head = ["Выпуск","ISIN","Полное наименование","Тип","Дата размещения","Дата погашения","Оферта","Объём выпуска, млрд ₽","Купон, %","Цена, %","Доходность, %","Мин. рейтинг","Агентство мин. рейтинга",...AGENCIES,"Уровень листинга","Для квал. инвесторов"];
+  const head = ["Выпуск","ISIN","Эмитент","ИНН эмитента","Тип","Дата размещения","Дата погашения","Оферта","Объём выпуска, млрд ₽","Купон, %","Цена, %","Доходность, %","Мин. рейтинг эмитента","Агентство мин. рейтинга",...AGENCIES.map(a => a+" (эмитент)"),"Уровень листинга","Для квал. инвесторов"];
   const data = rows.map(r => {
     const all = ratingsFor(r.isin);
-    return [r.name, r.isin, r.full, TYPE_LABEL[r.type], r.placed, r.mat||"бессрочная", r.offer && (!r.mat||r.offer<r.mat) ? r.offer : "",
+    const iss = issuerOf(r.isin);
+    return [r.name, r.isin, iss?.name || r.full, iss?.inn || "", TYPE_LABEL[r.type], r.placed, r.mat||"бессрочная", r.offer && (!r.mat||r.offer<r.mat) ? r.offer : "",
       r.volume!=null ? +(r.volume/1e9).toFixed(3) : "", r.cpn ?? "", r.price ?? "", r.yld ?? "",
       r.g?.label || "", r.g?.by || "", ...AGENCIES.map(a => r.type==="gov" && !all[a] ? "" : (all[a]||"")), r.list ?? "", r.qual ? "да" : "нет"];
   });
   const ws = XLSX.utils.aoa_to_sheet([head, ...data]);
-  ws["!cols"] = head.map((h,i) => ({wch: i===2 ? 48 : Math.max(10, h.length+2)}));
+  ws["!cols"] = head.map((h,i) => ({wch: i===2 ? 44 : Math.max(10, h.length+2)}));
   ws["!autofilter"] = {ref: XLSX.utils.encode_range({s:{r:0,c:0}, e:{r:data.length, c:head.length-1}})};
   const params = XLSX.utils.aoa_to_sheet([
     ["Параметр","Значение"],
     ["Период размещения", `${fmtD(prefs.from)} – ${fmtD(prefs.to)}`],
     ["Минимальный объём выпуска","1 млрд ₽"],
-    ["Минимальный рейтинг", (prefs.minGrade==="AA"?"AA":"AA−")+" (минимальный из АКРА, Эксперт РА, НКР, НРА)"],
+    ["Минимальный рейтинг эмитента", (prefs.minGrade==="AA"?"AA":"AA−")+" (минимальный из АКРА, Эксперт РА, НКР, НРА, нац. шкала)"],
+    ["Рейтинги собраны", issuerDb.updated ? new Date(issuerDb.updated).toLocaleString("ru-RU") : "—"],
     ["Исключены","структурные, субординированные, ЦФА, ИОС Сбербанка, номинал не в рублях"],
     ["Выпусков без рейтинга (не включены)", last.need.length],
     ["Источник","MOEX ISS, сформировано " + new Date().toLocaleString("ru-RU")],
@@ -485,7 +504,8 @@ function demoRows(){
     mk("D008","ДЕМО Металл 1Р6","Демо Металлургия ПАО 001Р-06","corp",-79,1200,20e9,16.9,100.6,17.6,1)
   ];
   const demoR = {"RU000DEMO002":{"АКРА":"AA(RU)","Эксперт РА":"ruAA+"},"RU000DEMO003":{"Эксперт РА":"ruAA-"},"RU000DEMO004":{"АКРА":"AA+(RU)"},"RU000DEMO008":{"АКРА":"AAA(RU)","НКР":"AAA.ru"}};
-  repoRatings = demoR;
+  issuerDb = {byInn:{}, isinInn:{}, updated:null, sources:{}};
+  Object.entries(demoR).forEach(([isin, rs], k) => { const inn = "770000000"+k; issuerDb.isinInn[isin] = inn; issuerDb.byInn[inn] = {name:"Демо-эмитент "+(k+1), ratings:Object.fromEntries(Object.entries(rs).map(([a,v])=>[a,{r:v}]))}; });
   return rows;
 }
 
@@ -509,7 +529,7 @@ document.addEventListener("change", e => {
   if(e.target.classList.contains("rin")){
     const isin = e.target.dataset.isin, rec = parseRatingText(e.target.value);
     if(Object.keys(rec).length) myRatings[isin] = rec; else delete myRatings[isin];
-    if(!e.target.value.trim()) myRatings[isin] = Object.fromEntries(Object.keys(repoRatings[isin]||{}).map(a=>[a,""]));
+    if(!e.target.value.trim()) myRatings[isin] = Object.fromEntries(Object.keys({...issuerRatings(isin), ...(repoRatings[isin]||{})}).map(a=>[a,""]));
     store.set("placementRatings", myRatings); render();
   }
 });

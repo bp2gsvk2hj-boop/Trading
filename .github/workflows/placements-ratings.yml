@@ -1,0 +1,44 @@
+name: Ratings for placements app
+
+# Ежедневно собирает рейтинги эмитентов АКРА, Эксперт РА, НКР, НРА в placements/ratings.json
+# и перевыкладывает сайт, чтобы страница /placements/ видела свежие данные.
+on:
+  schedule:
+    - cron: "17 3 * * *"   # 06:17 МСК
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["placements/fetch_ratings.py", "placements/rating_aliases.json", ".github/workflows/placements-ratings.yml"]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: placements-ratings
+  cancel-in-progress: false
+
+jobs:
+  ratings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Collect ratings
+        run: python3 placements/fetch_ratings.py
+      - name: Commit if changed
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add placements/ratings.json
+          if git diff --cached --quiet; then echo "changed=0" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git commit -m "Ratings: update placements/ratings.json"
+          git pull --rebase origin main && git push
+          echo "changed=1" >> "$GITHUB_OUTPUT"
+      - name: Redeploy Pages
+        if: steps.commit.outputs.changed == '1'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh workflow run konsilium-pages.yml --ref main
