@@ -92,6 +92,7 @@ LAT = str.maketrans("АВСДР", "ABCDR")
 def grade(raw: str):
     s = (raw or "").strip().translate(LAT).replace("–", "-").replace("−", "-").upper()
     s = re.sub(r"\(RU\)|\|RU\||\.RU$", "", s)
+    s = re.sub(r"\.SF\b|\(SF\)", "", s)
     s = re.sub(r"^RU", "", s).replace(" ", "")
     m = re.fullmatch(r"(AAA|AA|A|BBB|BB|B|CCC|CC|C|RD|SD|D)([+-]?)", s)
     return (m.group(1) + m.group(2)) if m else None
@@ -216,7 +217,7 @@ RAEX_LISTS = ["credits_all", "bankcredit_all", "regioncredit_all", "insurance_al
 def raex_rows(page: str) -> list[dict]:
     rows = []
     for tr in re.findall(r"<tr>(.*?)</tr>", page, re.S):
-        m = re.search(r'href="(/database/companies/[^"]+)">(.*?)</a>', tr, re.S)
+        m = re.search(r'href="(/database/(?:companies|regions)/[^"]+)">(.*?)</a>', tr, re.S)
         tds = re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
         if not m or len(tds) < 4:
             continue
@@ -228,36 +229,134 @@ def raex_rows(page: str) -> list[dict]:
     return rows
 
 
+def raex_issue_rows(page: str) -> list[dict]:
+    rows = []
+    for tr in re.findall(r"<tr>(.*?)</tr>", page, re.S):
+        m = re.search(r'href="(/database/securities/bonds/\d+)"[^>]*>(.*?)</a>', tr, re.S)
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
+        if not m or len(tds) < 4:
+            continue
+        raw = text(tds[1])
+        if not grade(raw):
+            continue
+        rows.append({"name": text(m.group(2)), "rating": raw, "outlook": text(tds[2]), "date": text(tds[3]),
+                     "url": "https://raexpert.ru" + m.group(1), "key": m.group(1)})
+    return rows
+
+
+def raex_paginate(lst: str, parser) -> list[dict]:
+    """Списки Эксперт РА листаются через POST хэша страницы в сессию и повторный GET того же адреса."""
+    h = Http(cookies=True)
+    url = f"https://raexpert.ru/ratings/{lst}/"
+    page = h.get(url)
+    out, seen, n = [], set(), 0
+    while page:
+        n += 1
+        added = 0
+        for r in parser(page):
+            if r["key"] not in seen:
+                seen.add(r["key"])
+                out.append(r)
+                added += 1
+        cur = re.search(r'b-paginator__link -active">\s*(\d+)', page)
+        cur = int(cur.group(1)) if cur else n
+        links = re.findall(r"setRatingPageHash\('([^']+)'\);\" class=\"b-paginator__link[^\"]*\">([^<]+)</span>", page)
+        nxt = next((hs for hs, lab in links if lab.strip() == str(cur + 1)), None) \
+            or next((hs for hs, lab in links if "»" in lab), None)
+        tok = re.search(r"CSRFAjaxTokenPageHash = '([^']+)'", page)
+        if not nxt or not tok or n >= 300 or (n > 1 and added == 0):
+            break
+        h.get("https://raexpert.ru/ratings/index/ajax-set-rating-page-hash/",
+              urllib.parse.urlencode({"rating_page_hash": nxt, "CSRFAjaxToken": tok.group(1)}).encode(),
+              {"X-Requested-With": "XMLHttpRequest", "Referer": url,
+               "Content-Type": "application/x-www-form-urlencoded"})
+        page = h.get(url)
+    log(f"Эксперт РА {lst}: страниц {n}, объектов {len(out)}")
+    return out
+
+
 def fetch_raex() -> list[dict]:
     out, seen = [], set()
     for lst in RAEX_LISTS:
-        h = Http(cookies=True)
-        url = f"https://raexpert.ru/ratings/{lst}/"
-        page = h.get(url)
-        n, total = 0, 0
-        while page:
-            n += 1
-            added = 0
-            for r in raex_rows(page):
-                total += 1
-                if r["key"] not in seen:
-                    seen.add(r["key"])
-                    out.append(r)
-                    added += 1
-            cur = re.search(r'b-paginator__link -active">\s*(\d+)', page)
-            cur = int(cur.group(1)) if cur else n
-            links = re.findall(r"setRatingPageHash\('([^']+)'\);\" class=\"b-paginator__link[^\"]*\">([^<]+)</span>", page)
-            nxt = next((hs for hs, lab in links if lab.strip() == str(cur + 1)), None) \
-                or next((hs for hs, lab in links if "»" in lab), None)
-            tok = re.search(r"CSRFAjaxTokenPageHash = '([^']+)'", page)
-            if not nxt or not tok or n >= 150 or (n > 1 and added == 0):
-                break
-            h.get("https://raexpert.ru/ratings/index/ajax-set-rating-page-hash/",
-                  urllib.parse.urlencode({"rating_page_hash": nxt, "CSRFAjaxToken": tok.group(1)}).encode(),
-                  {"X-Requested-With": "XMLHttpRequest", "Referer": url,
-                   "Content-Type": "application/x-www-form-urlencoded"})
-            page = h.get(url)
-        log(f"Эксперт РА {lst}: страниц {n}, строк {total}, всего уникальных объектов {len(out)}")
+        for r in raex_paginate(lst, raex_rows):
+            if r["key"] not in seen:
+                seen.add(r["key"])
+                out.append(r)
+    return out
+
+
+RAEX_ISSUE_LISTS = ["debt_inst", "securitization_all"]
+
+
+def fetch_raex_issues(isin_cache: dict) -> list[dict]:
+    """Рейтинги выпусков Эксперт РА. ISIN — со страницы облигации (кэшируется, не больше 400 новых за запуск)."""
+    rows, seen = [], set()
+    for lst in RAEX_ISSUE_LISTS:
+        for r in raex_paginate(lst, raex_issue_rows):
+            if r["key"] not in seen:
+                seen.add(r["key"])
+                rows.append(r)
+    h = Http()
+    todo = [r for r in rows if r["key"] not in isin_cache][:400]
+
+    def isin_of(r):
+        try:
+            p = h.get(r["url"]) or ""
+            m = re.search(r"\b([A-Z]{2}[A-Z0-9]{9}\d)\b", p[p.find("ISIN"):] if "ISIN" in p else "")
+            return r["key"], m.group(1) if m else ""
+        except Exception:  # noqa: BLE001
+            return r["key"], None
+    with ThreadPoolExecutor(4) as ex:
+        for k, isin in ex.map(isin_of, todo):
+            if isin is not None:
+                isin_cache[k] = isin
+    for r in rows:
+        r["isin"] = isin_cache.get(r["key"], "")
+    log(f"Эксперт РА выпуски: {len(rows)}, с ISIN {sum(1 for r in rows if r['isin'])}, новых страниц {len(todo)}")
+    return [r for r in rows if r["isin"]]
+
+
+def fetch_nkr_issues() -> list[dict]:
+    p = Http().get("https://www.ratings.ru/ratings/issues/") or ""
+    out = []
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", p, re.S):
+        tds = [text(x) for x in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)]
+        if len(tds) < 6 or not grade(tds[2]) or not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}\d", tds[3]):
+            continue
+        u = re.search(r'href="(/ratings/issues/\d+/)"', tr)
+        out.append({"name": tds[1], "rating": tds[2], "outlook": "", "date": tds[5], "isin": tds[3],
+                    "url": "https://www.ratings.ru" + (u.group(1) if u else "/ratings/issues/"), "key": tds[3]})
+    log(f"НКР выпуски: {len(out)}")
+    return out
+
+
+SMARTLAB_LABEL = "Smart-Lab"
+
+
+def fetch_smartlab(isins: list, prev: dict) -> dict:
+    """Запасной источник: рейтинг со страницы облигации на Smart-Lab (агрегатор, агентство не указано).
+    Только для свежих выпусков без единого рейтинга агентств; кэш на 7 дней."""
+    h = Http()
+    now = time.time()
+    out = {}
+    for isin in isins:
+        old = prev.get(isin)
+        if old and now - old.get("t", 0) < 7 * 86400:
+            out[isin] = old
+            continue
+        try:
+            p = h.get(f"https://smart-lab.ru/q/bonds/{isin}/") or ""
+        except Exception as e:  # noqa: BLE001
+            log("  Smart-Lab:", isin, e)
+            if old:
+                out[isin] = old
+            continue
+        i = p.find("Кредитный рейтинг")
+        m = re.search(r'linear-progress-bar__text">\s*([^<\s]+)', p[i:i + 1500]) if i >= 0 else None
+        raw = m.group(1).strip() if m else ""
+        out[isin] = {"r": raw if grade(raw) else "", "t": now, "url": f"https://smart-lab.ru/q/bonds/{isin}/"}
+        time.sleep(1)
+    log(f"Smart-Lab: проверено {len(isins)}, с рейтингом {sum(1 for v in out.values() if v['r'])}")
     return out
 
 
@@ -337,6 +436,22 @@ def short_root(sn: str) -> str:
     return "".join(t)
 
 
+REGION_WORDS = re.compile(r"област|край|республик|округ|город|москв|санкт|севастопол")
+REGION_DROP = re.compile(r"министерство финансов|департамент финансов|комитет финансов|управление финансов|"
+                         r"финансовое управление|министерство экономики и финансов|правительство|администрация|"
+                         r"в лице.*$|\(.*?\)")
+
+
+def region_key(name: str) -> str:
+    """«Министерство финансов Ростовской области» и «Ростовская область» -> «облас|росто»."""
+    s = (name or "").lower().replace("ё", "е")
+    if not REGION_WORDS.search(s):
+        return ""
+    s = REGION_DROP.sub(" ", s)
+    st = {w[:5] for w in re.split(r"[^а-яa-z-]+", s) if len(w) >= 3 and w[:5] not in {"город"}}
+    return "|".join(sorted(st))
+
+
 def build_matcher(inn_title: dict, aliases: dict, short: dict | None = None):
     """Сопоставление по названию: точное совпадение слов (без ОПФ и кавычек), затем — если одно название
     целиком совпадает с началом или концом другого по границе слов и кандидат единственный."""
@@ -348,6 +463,11 @@ def build_matcher(inn_title: dict, aliases: dict, short: dict | None = None):
             exact.setdefault("".join(tk), set()).add(inn)
             toks.append((tk, inn))
     al = {"".join(tokens(k)): v for k, v in aliases.items()}
+    regions: dict[str, set] = {}
+    for inn, t in inn_title.items():
+        k = region_key(t)
+        if k:
+            regions.setdefault(k, set()).add(inn)
     roots: dict[str, set] = {}
     for inn, names in (short or {}).items():
         for sn in names:
@@ -366,6 +486,9 @@ def build_matcher(inn_title: dict, aliases: dict, short: dict | None = None):
             return next(iter(exact[key])) if len(exact[key]) == 1 else ""
         if key in roots and len(roots[key]) == 1:
             return next(iter(roots[key]))
+        rk = region_key(name)
+        if rk and len(regions.get(rk, ())) == 1:
+            return next(iter(regions[rk]))
         if len(key) < 5:
             return ""
         cand = set()
@@ -377,6 +500,39 @@ def build_matcher(inn_title: dict, aliases: dict, short: dict | None = None):
                 cand.add(inn)
         return cand.pop() if len(cand) == 1 else ""
     return match
+
+
+def recent_unrated(isin_inn: dict, by_inn: dict, by_isin: dict, days: int = 100) -> list:
+    """Рублёвые выпуски от 1 млрд, размещённые за последние `days` дней, без рейтинга эмитента и выпуска."""
+    h = Http()
+    j = json.loads(h.get("https://iss.moex.com/iss/engines/stock/markets/bonds/securities.json"
+                         "?iss.only=securities&iss.meta=off&securities.columns=SECID,ISIN,FACEUNIT,FACEVALUE,ISSUESIZE,BOARDID"))
+    j = j["securities"]
+    c = {k: i for i, k in enumerate(j["columns"])}
+    cand, seen = [], set()
+    for r in j["data"]:
+        isin = r[c["ISIN"]]
+        if not isin or isin in seen or r[c["BOARDID"]] == "TQOB":
+            continue
+        seen.add(isin)
+        if r[c["FACEUNIT"]] not in ("SUR", "RUB", None) or (r[c["ISSUESIZE"]] or 0) * (r[c["FACEVALUE"]] or 0) < 1e9:
+            continue
+        if by_isin.get(isin) or by_inn.get(isin_inn.get(isin, "")):
+            continue
+        cand.append((r[c["SECID"]], isin))
+    since = datetime.fromtimestamp(time.time() - days * 86400, timezone.utc).date().isoformat()
+
+    def issued(x):
+        try:
+            d = json.loads(h.get(f"https://iss.moex.com/iss/securities/{x[0]}.json?iss.only=description&iss.meta=off"
+                                 "&description.columns=name,value"))["description"]["data"]
+            return x[1], dict(d).get("ISSUEDATE", "")
+        except Exception:  # noqa: BLE001
+            return x[1], ""
+    with ThreadPoolExecutor(8) as ex:
+        res = [isin for isin, d in ex.map(issued, cand) if d and d >= since]
+    log(f"Без рейтинга агентств: кандидатов {len(cand)}, размещены за {days} дней: {len(res)}")
+    return res
 
 
 # ---------------------------------------------------------------- main
@@ -436,20 +592,54 @@ def main() -> int:
                        "updated": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         log(f"{ag}: сопоставлено с эмитентами MOEX {ok} из {len(rows)}")
 
+    # ---- рейтинги выпусков (по ISIN)
+    by_isin: dict[str, dict] = {}
+    isin_cache = prev.get("raex_isin_cache", {})
+    for ag, fn in (("Эксперт РА", lambda: fetch_raex_issues(isin_cache)), ("НКР", fetch_nkr_issues)):
+        key = ag + " (выпуски)"
+        try:
+            rows = fn()
+            if not rows:
+                raise RuntimeError("пустой список")
+            for r in rows:
+                by_isin.setdefault(r["isin"], {})[ag] = {"r": r["rating"], "d": r["date"], "src": r["name"], "url": r["url"]}
+            sources[key] = {"ok": True, "error": None, "issuers": len(rows), "matched": len(rows),
+                            "updated": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        except Exception as e:  # noqa: BLE001
+            log(f"{key}: ОШИБКА {e} — оставляю данные прошлого запуска")
+            for isin, rec in prev.get("by_isin", {}).items():
+                if ag in rec:
+                    by_isin.setdefault(isin, {})[ag] = rec[ag]
+            sources[key] = {"ok": False, "error": str(e)[:300], "issuers": None, "matched": None,
+                            "updated": prev.get("sources", {}).get(key, {}).get("updated")}
+
+    # ---- запасной источник для свежих выпусков без единого рейтинга
+    fallback = {}
+    try:
+        recent = recent_unrated(isin_inn, by_inn, by_isin)
+        fallback = fetch_smartlab(recent, prev.get("fallback", {}))
+    except Exception as e:  # noqa: BLE001
+        log("Smart-Lab: ОШИБКА", e)
+        fallback = prev.get("fallback", {})
+
     if not any(s["ok"] for s in sources.values()):
         log("Ни одно агентство не ответило — файл не меняю")
         return 1
 
     data = {
-        "_comment": "Собирается placements/fetch_ratings.py. by_inn — рейтинги эмитентов по ИНН; isin_inn — ИНН эмитента "
-                    "по ISIN облигации (MOEX); ratings — ручные рейтинги выпусков по ISIN; inn_cache — служебный кэш.",
+        "_comment": "Собирается placements/fetch_ratings.py. by_inn — рейтинги эмитентов по ИНН; by_isin — рейтинги "
+                    "выпусков по ISIN; fallback — рейтинг Smart-Lab для свежих выпусков без рейтингов агентств; isin_inn — "
+                    "ИНН эмитента по ISIN (MOEX); ratings — ручные рейтинги выпусков; *_cache — служебные кэши.",
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sources": sources,
         "by_inn": dict(sorted(by_inn.items())),
+        "by_isin": dict(sorted(by_isin.items())),
+        "fallback": fallback,
         "isin_inn": dict(sorted(isin_inn.items())),
         "ratings": prev.get("ratings", {}),
         "unmatched": unmatched,
         "inn_cache": new_cache,
+        "raex_isin_cache": isin_cache,
     }
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))

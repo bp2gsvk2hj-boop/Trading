@@ -151,7 +151,7 @@ tbody tr:hover td{background:var(--soft)}
   <div class="notes">
     <div>Дата размещения — поле ISSUEDATE в описании выпуска на MOEX. Для выпусков через книгу заявок это день технического размещения, он же день его завершения.</div>
     <div>Объём выпуска — количество бумаг × первоначальный номинал. ОФЗ получают суверенный рейтинг AAA автоматически.</div>
-    <div>Рейтинг — кредитный рейтинг эмитента по национальной шкале. Каждое утро GitHub Actions собирает их с сайтов АКРА, НКР, Эксперт РА и из базы Финмаркета (НРА) в <code>placements/ratings.json</code>. Эмитенты АКРА и НКР привязываются к бирже по ИНН, Эксперт РА и НРА — по названию; несовпавшие названия можно привязать вручную в <code>placements/rating_aliases.json</code>.</div><div>Рейтинги, введённые или загруженные здесь, хранятся в этом браузере и важнее собранных.</div>
+    <div>Рейтинг — минимальный из кредитных рейтингов эмитента и рейтингов самого выпуска по национальной шкале. Рейтинги выпусков (НКР, Эксперт РА, включая секьюритизацию .sf) закрывают СФО, ипотечных агентов и финансовые «дочки». Если у свежего выпуска нет ни одного рейтинга агентств, берётся рейтинг со страницы облигации на Smart-Lab — это агрегатор, источник помечен в таблице и в Excel.</div><div>Каждое утро GitHub Actions собирает рейтинги с сайтов АКРА, НКР, Эксперт РА и из базы Финмаркета (НРА) в <code>placements/ratings.json</code>. Эмитенты АКРА и НКР привязываются к бирже по ИНН, Эксперт РА и НРА — по названию; несовпавшие названия можно привязать вручную в <code>placements/rating_aliases.json</code>.</div><div>Рейтинги, введённые или загруженные здесь, хранятся в этом браузере и важнее собранных.</div>
     <div>В файле Excel — только итоговая таблица, рейтинги по каждому агентству в отдельных столбцах, и лист с параметрами отбора.</div>
   </div>
 </div>
@@ -181,7 +181,7 @@ const WIN_START = monthsAgo(3);
 const LAT = {"А":"A","В":"B","С":"C","Д":"D","Р":"R"};
 function gradeOf(raw){
   let s = String(raw||"").trim().replace(/[АВСДР]/g, ch => LAT[ch]).replace(/[–−]/g,"-").toUpperCase();
-  s = s.replace(/\(RU\)|\|RU\||\.RU$/g,"").replace(/^RU/,"").replace(/\s+/g,"");
+  s = s.replace(/\(RU\)|\|RU\||\.RU$/g,"").replace(/\.SF\b|\(SF\)/g,"").replace(/^RU/,"").replace(/\s+/g,"");
   const m = s.match(/^(AAA|AA|A|BBB|BB|B|CCC|CC|C|RD|SD|D)([+-]?)$/);
   if(!m) return null;
   const base = m[1]==="SD" ? "RD" : m[1];
@@ -205,11 +205,19 @@ function parseRatingText(text){   // "AA(RU), ruAA+" -> {АКРА:"AA(RU)", "Э�
   return out;
 }
 let repoRatings = {};                          // ручные рейтинги выпусков из ratings.json (по ISIN)
-let issuerDb = {byInn:{}, isinInn:{}, updated:null, sources:{}};  // рейтинги эмитентов из ratings.json
+let issuerDb = {byInn:{}, isinInn:{}, byIsin:{}, fallback:{}, updated:null, sources:{}};  // рейтинги из ratings.json
 const issuerOf = isin => { const inn = state.innOf[isin]?.inn || issuerDb.isinInn[isin]; if(!inn) return null; const rec = issuerDb.byInn[inn]; return {inn, name: rec?.name || state.innOf[isin]?.title || "", ratings: rec?.ratings || {}}; };
 const issuerRatings = isin => { const x = issuerOf(isin), o = {}; if(x) for(const a in x.ratings) o[a] = x.ratings[a].r; return o; };
 let myRatings = store.get("placementRatings", {});  // {ISIN: {agency: raw}}
-const ratingsFor = isin => ({...issuerRatings(isin), ...(repoRatings[isin]||{}), ...(myRatings[isin]||{})});
+// рейтинги выпуска (НКР, Эксперт РА) — под ключом «агентство, выпуск»; Smart-Lab — только если нет ни одного рейтинга агентств
+const issueRatings = isin => { const o = {}, x = issuerDb.byIsin[isin] || {}; for(const a in x) o[a + ", выпуск"] = x[a].r; return o; };
+function ratingsFor(isin){
+  const all = {...issuerRatings(isin), ...issueRatings(isin), ...(repoRatings[isin]||{}), ...(myRatings[isin]||{})};
+  const any = Object.values(all).some(v => gradeOf(v));
+  const fb = issuerDb.fallback[isin];
+  if(!any && fb && gradeOf(fb.r)) all["Smart-Lab"] = fb.r;
+  return all;
+}
 function minRating(r){
   if(r.type==="gov") return {label:"AAA", rank:SCALE.indexOf("AAA")*3, by:"суверенный"};
   const all = ratingsFor(r.isin); let best = null;
@@ -269,7 +277,7 @@ async function loadAll(){
   try{
     for(const u of ["ratings.json", "https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/placements/ratings.json"]){
       try{ const r = await fetch(u, {cache:"no-store"}); if(r.ok){ const j = await r.json();
-        if(!issuerDb.updated || (j.updated||"") > issuerDb.updated){ repoRatings = j.ratings || {}; issuerDb = {byInn:j.by_inn||{}, isinInn:j.isin_inn||{}, updated:j.updated||null, sources:j.sources||{}}; } } }catch(e){}
+        if(!issuerDb.updated || (j.updated||"") > issuerDb.updated){ repoRatings = j.ratings || {}; issuerDb = {byInn:j.by_inn||{}, isinInn:j.isin_inn||{}, byIsin:j.by_isin||{}, fallback:j.fallback||{}, updated:j.updated||null, sources:j.sources||{}}; } } }catch(e){}
     }
     const j = await getJ(`${ISS}/engines/stock/markets/bonds/securities.json?iss.only=securities,marketdata&marketdata.columns=SECID,BOARDID,LAST,WAPRICE,MARKETPRICETODAY,YIELD`);
     const md = {}; rowsOf(j.marketdata).forEach(m => md[m.SECID+"|"+m.BOARDID] = m);
@@ -360,7 +368,7 @@ const nf = (v,d=2) => v==null||v===""||isNaN(v) ? "—" : (+v).toLocaleString("r
 function ratingCell(r, mode){
   if(r.type==="gov") return `<span class="pill ok">AAA</span><span class="ag">суверенный</span>`;
   const g = r.g, cls = !g ? "" : g.rank >= gradeOf("AA").rank ? "ok" : g.rank >= gradeOf("A-").rank ? "mid" : "hi";
-  return `${g?`<span class="pill ${cls}">${g.label}</span> `:""}<input class="rin ${g?"":"need"}" data-isin="${esc(r.isin)}" value="${esc(ratingText(r.isin))}" placeholder="AA(RU), ruAA+, AA.ru, AA|ru|" aria-label="Рейтинги ${esc(r.name)}">${g?`<span class="ag">мин.: ${esc(g.by)}</span>`:""}`;
+  return `${g?`<span class="pill ${cls}">${g.label}</span> `:""}<input class="rin ${g?"":"need"}" data-isin="${esc(r.isin)}" value="${esc(ratingText(r.isin))}" placeholder="AA(RU), ruAA+, AA.ru, AA|ru|" aria-label="Рейтинги ${esc(r.name)}">${g?`<span class="ag">мин.: ${esc(g.by)}${g.by==="Smart-Lab"?" — агрегатор, агентство не указано":""}</span>`:""}`;
 }
 function rowHtml(r, mode){
   const offer = r.offer && (!r.mat || r.offer < r.mat) ? `<span class="days">оферта ${fmtD(r.offer)}</span>` : "";
@@ -419,13 +427,13 @@ const clampDate = v => !v ? null : v < WIN_START ? WIN_START : v > todayIso() ? 
 /* ---------- Excel ---------- */
 function exportXlsx(){
   const rows = sortRows([...last.main]);
-  const head = ["Выпуск","ISIN","Эмитент","ИНН эмитента","Тип","Дата размещения","Дата погашения","Оферта","Объём выпуска, млрд ₽","Купон, %","Цена, %","Доходность, %","Мин. рейтинг эмитента","Агентство мин. рейтинга",...AGENCIES.map(a => a+" (эмитент)"),"Уровень листинга","Для квал. инвесторов"];
+  const head = ["Выпуск","ISIN","Эмитент","ИНН эмитента","Тип","Дата размещения","Дата погашения","Оферта","Объём выпуска, млрд ₽","Купон, %","Цена, %","Доходность, %","Мин. рейтинг","Источник мин. рейтинга",...AGENCIES,"Smart-Lab (агрегатор)","Уровень листинга","Для квал. инвесторов"];
   const data = rows.map(r => {
     const all = ratingsFor(r.isin);
     const iss = issuerOf(r.isin);
     return [r.name, r.isin, iss?.name || r.full, iss?.inn || "", TYPE_LABEL[r.type], r.placed, r.mat||"бессрочная", r.offer && (!r.mat||r.offer<r.mat) ? r.offer : "",
       r.volume!=null ? +(r.volume/1e9).toFixed(3) : "", r.cpn ?? "", r.price ?? "", r.yld ?? "",
-      r.g?.label || "", r.g?.by || "", ...AGENCIES.map(a => r.type==="gov" && !all[a] ? "" : (all[a]||"")), r.list ?? "", r.qual ? "да" : "нет"];
+      r.g?.label || "", r.g?.by || "", ...AGENCIES.map(a => [all[a] ? all[a] : "", all[a+", выпуск"] ? all[a+", выпуск"]+" (выпуск)" : ""].filter(Boolean).join("; ")), all["Smart-Lab"] || "", r.list ?? "", r.qual ? "да" : "нет"];
   });
   const ws = XLSX.utils.aoa_to_sheet([head, ...data]);
   ws["!cols"] = head.map((h,i) => ({wch: i===2 ? 44 : Math.max(10, h.length+2)}));
@@ -504,7 +512,7 @@ function demoRows(){
     mk("D008","ДЕМО Металл 1Р6","Демо Металлургия ПАО 001Р-06","corp",-79,1200,20e9,16.9,100.6,17.6,1)
   ];
   const demoR = {"RU000DEMO002":{"АКРА":"AA(RU)","Эксперт РА":"ruAA+"},"RU000DEMO003":{"Эксперт РА":"ruAA-"},"RU000DEMO004":{"АКРА":"AA+(RU)"},"RU000DEMO008":{"АКРА":"AAA(RU)","НКР":"AAA.ru"}};
-  issuerDb = {byInn:{}, isinInn:{}, updated:null, sources:{}};
+  issuerDb = {byInn:{}, isinInn:{}, byIsin:{}, fallback:{}, updated:null, sources:{}};
   Object.entries(demoR).forEach(([isin, rs], k) => { const inn = "770000000"+k; issuerDb.isinInn[isin] = inn; issuerDb.byInn[inn] = {name:"Демо-эмитент "+(k+1), ratings:Object.fromEntries(Object.entries(rs).map(([a,v])=>[a,{r:v}]))}; });
   return rows;
 }
@@ -529,7 +537,7 @@ document.addEventListener("change", e => {
   if(e.target.classList.contains("rin")){
     const isin = e.target.dataset.isin, rec = parseRatingText(e.target.value);
     if(Object.keys(rec).length) myRatings[isin] = rec; else delete myRatings[isin];
-    if(!e.target.value.trim()) myRatings[isin] = Object.fromEntries(Object.keys({...issuerRatings(isin), ...(repoRatings[isin]||{})}).map(a=>[a,""]));
+    if(!e.target.value.trim()) myRatings[isin] = Object.fromEntries(Object.keys({...issuerRatings(isin), ...issueRatings(isin), ...(repoRatings[isin]||{})}).map(a=>[a,""]));
     store.set("placementRatings", myRatings); render();
   }
 });
