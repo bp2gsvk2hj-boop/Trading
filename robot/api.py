@@ -6,6 +6,7 @@ on top of the system CAs. HTTPS_PROXY is honored by urllib automatically.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import ssl
@@ -89,7 +90,9 @@ class Client:
                     delay *= 2
                     continue
                 raise ApiError(method, e.code, body_text) from None
-            except (urllib.error.URLError, TimeoutError):
+            # IncompleteRead / reset: the connection dropped mid-response (seen on the ~5 MB
+            # futures list), a transient network error like a timeout
+            except (urllib.error.URLError, TimeoutError, http.client.HTTPException, ConnectionError):
                 if attempt < self.retries:
                     time.sleep(delay)
                     delay *= 2
