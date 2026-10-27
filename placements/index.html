@@ -144,13 +144,13 @@ tbody tr:hover td{background:var(--soft)}
 
   <details class="panel" id="exclPanel">
     <summary><h2 id="exclTitle">Исключены</h2></summary>
-    <p>Размещены в выбранный период, но не прошли правила: объём меньше 1 млрд ₽, рейтинг ниже порога, номинал не в рублях, структурные, субординированные, ЦФА, ИОС Сбербанка или ипотечные ценные бумаги.</p>
+    <p>Размещены в выбранный период, но не прошли правила: объём меньше 1 млрд ₽, рейтинг ниже порога, номинал не в рублях, структурные, субординированные, ЦФА, ИОС Сбербанка, ипотечные ценные бумаги или секьюритизация (кроме СФО СБ Секьюритизация).</p>
     <div class="tablebox"><table><thead><tr class="head" data-t="excl"></tr></thead><tbody id="exclBody"></tbody></table></div>
   </details>
 
   <div class="notes">
     <div>Дата размещения — поле ISSUEDATE в описании выпуска на MOEX. Для выпусков через книгу заявок это день технического размещения, он же день его завершения.</div>
-    <div>Ипотечные ценные бумаги — выпуски, у которых в наименовании на MOEX указано ипотечное покрытие (облигации ипотечных агентов, ДОМ.РФ и банков). Облигации СФО с залогом денежных требований к ним не относятся и остаются в выборке.</div><div>Объём выпуска — количество бумаг × первоначальный номинал. ОФЗ получают суверенный рейтинг AAA автоматически.</div>
+    <div>Ипотечные ценные бумаги — выпуски, у которых в наименовании на MOEX указано ипотечное покрытие (облигации ипотечных агентов, ДОМ.РФ и банков). Облигации секьюритизации — выпуски СФО с залогом денежных требований — тоже исключаются, кроме бумаг СФО СБ Секьюритизация.</div><div>Объём выпуска — количество бумаг × первоначальный номинал. ОФЗ получают суверенный рейтинг AAA автоматически.</div>
     <div>Рейтинг — минимальный из кредитных рейтингов эмитента и рейтингов самого выпуска по национальной шкале. Рейтинги выпусков (НКР, Эксперт РА, включая секьюритизацию .sf) закрывают СФО, ипотечных агентов и финансовые «дочки». Если у свежего выпуска нет ни одного рейтинга агентств, берётся рейтинг со страницы облигации на Smart-Lab — это агрегатор, источник помечен в таблице и в Excel.</div><div>Каждое утро GitHub Actions собирает рейтинги с сайтов АКРА, НКР, Эксперт РА и из базы Финмаркета (НРА) в <code>placements/ratings.json</code>. Эмитенты АКРА и НКР привязываются к бирже по ИНН, Эксперт РА и НРА — по названию; несовпавшие названия можно привязать вручную в <code>placements/rating_aliases.json</code>.</div><div>Рейтинги, введённые или загруженные здесь, хранятся в этом браузере и важнее собранных.</div>
     <div>В файле Excel — только итоговая таблица, рейтинги по каждому агентству в отдельных столбцах, и лист с параметрами отбора.</div>
   </div>
@@ -228,7 +228,7 @@ const ratingText = isin => Object.values(ratingsFor(isin)).filter(Boolean).join(
 
 /* ---------- state ---------- */
 const prefs = Object.assign({from: WIN_START, to: todayIso(), minGrade:"AA"}, store.get("placementPrefs", {}));
-let descCache = store.get("placementDesc_v2", {});
+let descCache = store.get("placementDesc_v3", {});
 let state = {rows:[], demo:false, sort:{key:"placed", dir:-1}, innOf:{}};
 
 async function getJ(url){
@@ -269,7 +269,9 @@ function compactDesc(rows){
     t: textKeys.map(k => m[k]).filter(v => v && isNaN(+v)).join(" ").slice(0,400),
     e: m.EMITTER_TITLE || m.EMITENT_TITLE || "",
     // ипотечные ценные бумаги: в наименовании выпуска MOEX — «с ипотечным покрытием» (ипотечные облигации, ИСУ)
-    mo: /ипотечн\S* покрыти|ипотечн\S* сертификат/i.test([m.ISSUENAME, m.NAME].join(" ")) || /ипотечный агент/i.test(m.NAME || "")
+    mo: /ипотечн\S* покрыти|ипотечн\S* сертификат/i.test([m.ISSUENAME, m.NAME].join(" ")) || /ипотечный агент/i.test(m.NAME || ""),
+    // секьюритизация: облигации СФО с залогом денежных требований; СФО СБ Секьюритизация и проектное финансирование СОПФ оставляем
+    sc: /залог/i.test(m.ISSUENAME || "") && /денежн\S* требовани/i.test(m.ISSUENAME || "") && !/сб\s*секьюритизац|сопф/i.test([m.NAME, m.SHORTNAME].join(" "))
   };
 }
 
@@ -296,13 +298,13 @@ async function loadAll(){
     await pool(need, 8, s => getJ(`${ISS}/securities/${s.SECID}.json?iss.only=description&description.columns=name,title,value`)
       .then(r => { descCache[s.SECID] = compactDesc(rowsOf(r.description)); }),
       () => setProgress(0.12 + 0.88*(++step)/(need.length||1)));
-    store.set("placementDesc_v2", descCache);
+    store.set("placementDesc_v3", descCache);
     state.rows = cand.map(s => build(s, md[s.SECID+"|"+s.BOARDID]||{}, descCache[s.SECID])).filter(r => r && r.placed && r.placed >= WIN_START && r.placed <= today);
     // ИНН эмитента: из ratings.json, а для свежих выпусков, которых там ещё нет, — запросом к MOEX
     const noInn = state.rows.filter(r => r.isin && !issuerDb.isinInn[r.isin] && !descCache[r.id]?.inn);
     await pool(noInn, 6, r => getJ(`${ISS}/securities.json?q=${r.isin}&iss.only=securities&securities.columns=isin,emitent_inn,emitent_title`)
       .then(j => { const x = rowsOf(j.securities).find(y => y.isin===r.isin); if(x && x.emitent_inn) Object.assign(descCache[r.id], {inn:x.emitent_inn, en:x.emitent_title||""}); }));
-    store.set("placementDesc_v2", descCache);
+    store.set("placementDesc_v3", descCache);
     state.rows.forEach(r => { const d = descCache[r.id]; if(d?.inn) state.innOf[r.isin] = {inn:d.inn, title:d.en}; });
     const failed = Object.entries(issuerDb.sources).filter(([,v]) => !v.ok).map(([k]) => k);
     state.demo = false;
@@ -334,6 +336,7 @@ function build(s, m, d){
   if(/цфа|цифров\w* финансов\w* актив/.test(lt)) hard.push("ЦФА");
   if(/\bиос\b|инвестиционн\w* облигац/.test(lt) && /сбер/.test(lt)) hard.push("ИОС Сбербанка");
   if(d.mo) hard.push("ипотечная ценная бумага");
+  if(d.sc) hard.push("секьюритизация: облигации СФО с залогом денежных требований");
   if(volume!=null && volume < MIN_VOLUME) hard.push(`объём ${bn(volume)} млрд ₽ — меньше 1 млрд`);
   if(volume==null) hard.push("объём выпуска не указан на бирже");
   return {
@@ -411,7 +414,7 @@ function render(){
     ["Без рейтинга", last.need.length, last.need.length?"alarm":""],
     ["Исключено", last.excl.length, ""]
   ].map(([l,v,c]) => `<div class="kpi ${c}"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
-  $("#rules").textContent = `Период размещения ${fmtD(prefs.from)} – ${fmtD(prefs.to)} (доступно с ${fmtD(WIN_START)}). Объём ≥ 1 млрд ₽, минимальный рейтинг среди АКРА, Эксперт РА, НКР, НРА — ${prefs.minGrade==="AA"?"AA и выше":"AA− и выше"}. Без структурных, субординированных, ЦФА, ИОС Сбербанка и ипотечных ценных бумаг.`;
+  $("#rules").textContent = `Период размещения ${fmtD(prefs.from)} – ${fmtD(prefs.to)} (доступно с ${fmtD(WIN_START)}). Объём ≥ 1 млрд ₽, минимальный рейтинг среди АКРА, Эксперт РА, НКР, НРА — ${prefs.minGrade==="AA"?"AA и выше":"AA− и выше"}. Без структурных, субординированных, ЦФА, ИОС Сбербанка, ипотечных ценных бумаг и секьюритизации (кроме СФО СБ Секьюритизация).`;
   $("#export").disabled = !last.main.length || typeof XLSX==="undefined";
 }
 function syncControls(){
@@ -447,7 +450,7 @@ function exportXlsx(){
     ["Минимальный объём выпуска","1 млрд ₽"],
     ["Минимальный рейтинг эмитента", (prefs.minGrade==="AA"?"AA":"AA−")+" (минимальный из АКРА, Эксперт РА, НКР, НРА, нац. шкала)"],
     ["Рейтинги собраны", issuerDb.updated ? new Date(issuerDb.updated).toLocaleString("ru-RU") : "—"],
-    ["Исключены","структурные, субординированные, ЦФА, ИОС Сбербанка, ипотечные ценные бумаги, номинал не в рублях"],
+    ["Исключены","структурные, субординированные, ЦФА, ИОС Сбербанка, ипотечные ценные бумаги, секьюритизация (кроме СФО СБ Секьюритизация), номинал не в рублях"],
     ["Выпусков без рейтинга (не включены)", last.need.length],
     ["Источник","MOEX ISS, сформировано " + new Date().toLocaleString("ru-RU")],
     ...(state.demo ? [["ВНИМАНИЕ","демо-данные, не реальные выпуски"]] : [])
