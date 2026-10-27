@@ -1,0 +1,13 @@
+name: probe rating sources
+on: { push: { branches: [probe-ratings] } }
+permissions: { contents: write }
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .probe/diag.py; true
+      - run: |
+          git config user.name probe && git config user.email probe@users.noreply.github.com
+          git add -f placements/run.log && git commit -m "probe results D1 [skip ci]" && git push -f origin HEAD:refs/heads/probe-out
