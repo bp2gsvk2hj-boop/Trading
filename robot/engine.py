@@ -83,6 +83,18 @@ class Engine:
         return (s.get("tradingStatus") == "SECURITY_TRADING_STATUS_NORMAL_TRADING"
                 and s.get("apiTradeAvailableFlag") and s.get("marketOrderAvailableFlag"))
 
+    def _last_price(self, inst: Instrument) -> float:
+        r = self.c.call("MarketDataService/GetLastPrices", {"instrumentId": [inst.uid]})
+        return q2f((r.get("lastPrices") or [{}])[0].get("price"))
+
+    def _limits(self, inst: Instrument) -> tuple[float, float]:
+        """Exchange price band; stop orders outside it are rejected. Paper has no band."""
+        if isinstance(self.broker, PaperBroker):
+            return float("-inf"), float("inf")
+        ob = self.c.call("MarketDataService/GetOrderBook", {"instrumentId": inst.uid, "depth": 1})
+        lo, hi = q2f(ob.get("limitDown")), q2f(ob.get("limitUp"))
+        return (lo or float("-inf")), (hi or float("inf"))
+
     # ---- order helpers (respect dry-run) -----------------------------------
     def _market(self, inst, side, qty, key, why):
         if self.dry:
@@ -330,7 +342,18 @@ class Engine:
                 why = f"{self.stopouts} stop-outs today"
             elif not market_open():
                 why = "market closed"
-            qty, note = size(inst, last.c, act.stop, risk, margin) if not why else (0, why)
+            px = last.c
+            if not why:
+                # The signal is on the bar close, the order goes in at the live price: if the market
+                # already ran past the stop (e.g. 29.10: short at 12.116 with the stop at ~12.10),
+                # the stop cannot be placed and the trade makes no sense.
+                px = self._last_price(inst) or last.c
+                lo, hi = self._limits(inst)
+                if (px - act.stop) * act.side <= 0:
+                    why = f"price {px:g} already beyond the stop {inst.round_price(act.stop):g}"
+                elif not (lo <= act.stop <= hi):
+                    why = f"stop {inst.round_price(act.stop):g} outside the exchange limits {lo:g}-{hi:g}"
+            qty, note = size(inst, px, act.stop, risk, margin) if not why else (0, why)
             if not qty:
                 self.log("signal_skipped", ticker=inst.ticker, side=act.side, reason=act.reason, why=note)
                 return 0.0
