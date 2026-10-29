@@ -243,6 +243,17 @@ class EngineTest(unittest.TestCase):
         self.assertEqual([(s.side, s.qty) for s in stops], [(1, -h.qty)])
         self.assertGreater(stops[0].price, 96)
 
+    def test_no_entry_when_price_already_beyond_the_stop(self):
+        # 29.10: the bar closed below the channel, but by the pass the price was back above the stop
+        bars = flat_then_breakout()                  # long breakout, close 102, stop 99.73
+        eng = make_engine(self.tmp.name, bars)
+        real = eng.c.call
+        eng.c.call = lambda m, b=None: ({"lastPrices": [{"price": f2q(99.5)}]}
+                                        if m == "MarketDataService/GetLastPrices" else real(m, b))
+        notes = eng.run_once(NOW)
+        self.assertEqual(eng.broker.holding(INST).qty, 0)
+        self.assertTrue(any("[signal_skipped]" in n and "beyond the stop" in n for n in notes), notes)
+
     def test_stopout_limit_blocks_reentry(self):
         bars = flat_then_breakout()
         risk = RiskConfig(capital_rub=50_000, max_risk_per_trade=0.05, max_stopouts_per_day=1)
