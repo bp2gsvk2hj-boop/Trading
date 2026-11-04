@@ -135,6 +135,32 @@ class PerformanceTest(unittest.TestCase):
         self.assertIn("TWR +11,10%", lines[1])
 
 
+class MarketOrderFillTest(unittest.TestCase):
+    def test_waits_for_fill_and_cancels_the_rest(self):
+        from robot.broker import ApiBroker
+        calls = []
+
+        class C:
+            def call(self, method, body=None):
+                calls.append(method)
+                if method == "OrdersService/PostOrder":
+                    return {"orderId": "o1", "executionReportStatus": "EXECUTION_REPORT_STATUS_NEW"}
+                if method == "OrdersService/GetOrderState":
+                    return {"orderId": "o1", "executionReportStatus": "EXECUTION_REPORT_STATUS_PARTIALLYFILL",
+                            "lotsExecuted": "5", "executedOrderPrice": f2q(1210.0)}
+                if method == "OrdersService/CancelOrder":
+                    return {}
+                raise AssertionError(method)
+
+        b = ApiBroker(C(), "acc", sandbox=False)
+        b.fill_wait_polls = 2
+        with unittest.mock.patch("robot.broker.time.sleep"):
+            px = b.market(INST, 1, 11, "k")
+        self.assertEqual(calls.count("OrdersService/GetOrderState"), 2)
+        self.assertIn("OrdersService/CancelOrder", calls)
+        self.assertAlmostEqual(px, 12.1)            # 1210 RUB per contract / 100 RUB per point
+
+
 class RiskTest(unittest.TestCase):
     def test_size_by_risk_and_margin(self):
         cfg = RiskConfig(capital_rub=5000, risk_per_trade=0.01, max_risk_per_trade=0.03, max_margin_share=0.6, fee_rate=0)
@@ -242,6 +268,45 @@ class EngineTest(unittest.TestCase):
         stops = eng4.broker.stops(INST)
         self.assertEqual([(s.side, s.qty) for s in stops], [(1, -h.qty)])
         self.assertGreater(stops[0].price, 96)
+
+    def test_trail_places_new_stop_before_cancelling_old(self):
+        bars = flat_then_breakout()
+        make_engine(self.tmp.name, bars).run_once(NOW)
+        bars += [bar(NOW, 102, 103.5, 101.9, 103.4), bar(NOW + H, 103.4, 104.6, 103.3, 104.5)]
+        eng = make_engine(self.tmp.name, bars)
+        old = eng.broker.stops(INST)[0]
+        notes = eng.run_once(NOW + 2 * H)
+        kinds = [n.split("]")[0] + "]" for n in notes if n.startswith("[stop_")]
+        self.assertEqual(kinds, ["[stop_placed]", "[stop_cancelled]"], notes)
+        from robot.telegram import order_messages, parse_run
+        self.assertTrue(order_messages(parse_run("\n".join(notes)))[0].startswith("🛡 Стоп передвинут TEST"))
+        new = eng.broker.stops(INST)
+        self.assertEqual(len(new), 1)
+        self.assertGreater(new[0].price, old.price)
+
+    def test_rejected_trail_keeps_the_old_stop(self):
+        bars = flat_then_breakout()
+        make_engine(self.tmp.name, bars).run_once(NOW)
+        bars += [bar(NOW, 102, 103.5, 101.9, 103.4), bar(NOW + H, 103.4, 104.6, 103.3, 104.5)]
+        eng = make_engine(self.tmp.name, bars)
+        old = eng.broker.stops(INST)[0]
+
+        def reject(*a, **k):
+            raise RuntimeError("HTTP 400: price outside the limits")
+        eng.broker.post_stop = reject
+        notes = eng.run_once(NOW + 2 * H)
+        self.assertTrue(any("[error]" in n and "old stop kept" in n for n in notes), notes)
+        self.assertEqual([(s.id, s.price) for s in eng.broker.stops(INST)], [(old.id, old.price)])
+
+    def test_stop_covers_only_the_filled_part(self):
+        bars = flat_then_breakout()
+        eng = make_engine(self.tmp.name, bars)
+        real = eng.broker.market
+        eng.broker.market = lambda inst, side, qty, key: real(inst, side, 1, key)   # 1 lot filled
+        notes = eng.run_once(NOW)
+        self.assertTrue(any("[warn]" in n and "entry filled 1 of" in n for n in notes), notes)
+        self.assertEqual(eng.broker.holding(INST).qty, 1)
+        self.assertEqual([(s.side, s.qty) for s in eng.broker.stops(INST)], [(-1, 1)])
 
     def test_no_entry_when_price_already_beyond_the_stop(self):
         # 29.10: the bar closed below the channel, but by the pass the price was back above the stop

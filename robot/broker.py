@@ -6,6 +6,7 @@ are in points; quantities are in contracts (lot = 1 for all supported futures).
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -60,6 +61,7 @@ class ApiBroker(Broker):
     def __init__(self, client: Client, account_id: str, sandbox: bool):
         self.c, self.acc, self.sandbox = client, account_id, sandbox
         self.mode = "sandbox" if sandbox else "live"
+        self.fill_wait_polls = 10      # x 0.5 s for a market order to fill
 
     def _m(self, live: str, sandbox: str) -> str:
         return sandbox if self.sandbox else live
@@ -95,7 +97,23 @@ class ApiBroker(Broker):
             "orderType": "ORDER_TYPE_MARKET", "orderId": key,
         })
         status = r.get("executionReportStatus", "")
-        if status not in ("EXECUTION_REPORT_STATUS_FILL", "EXECUTION_REPORT_STATUS_PARTIALLYFILL", "EXECUTION_REPORT_STATUS_NEW"):
+        oid = r.get("orderId")
+        # A market order is usually FILL at once; NEW / PARTIALLYFILL: wait a few seconds, then
+        # cancel the rest. The engine takes the real position from the broker afterwards.
+        for _ in range(self.fill_wait_polls):
+            if status not in ("EXECUTION_REPORT_STATUS_NEW", "EXECUTION_REPORT_STATUS_PARTIALLYFILL") or not oid:
+                break
+            time.sleep(0.5)
+            r = self.c.call(self._m("OrdersService/GetOrderState", "SandboxService/GetSandboxOrderState"),
+                            {"accountId": self.acc, "orderId": oid})
+            status = r.get("executionReportStatus", "")
+        if status in ("EXECUTION_REPORT_STATUS_NEW", "EXECUTION_REPORT_STATUS_PARTIALLYFILL") and oid:
+            try:
+                self.c.call(self._m("OrdersService/CancelOrder", "SandboxService/CancelSandboxOrder"),
+                            {"accountId": self.acc, "orderId": oid})
+            except Exception:
+                pass   # filled meanwhile: the position check in the engine sees it
+        if status != "EXECUTION_REPORT_STATUS_FILL" and not int(r.get("lotsExecuted") or 0):
             raise RuntimeError(f"order not filled: {status} {r}")
         # executedOrderPrice is in rubles per contract for futures; convert to points
         px = q2f(r.get("executedOrderPrice"))
