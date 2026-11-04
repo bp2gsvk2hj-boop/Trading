@@ -91,8 +91,9 @@ def trade_messages(trades: list[dict], pos: dict[str, dict], reasons: dict[str, 
 
 
 def order_messages(events: list[tuple[str, str]]) -> list[str]:
-    """Stop orders the robot placed / moved / cancelled in this run."""
-    out, pending_trail = [], set()
+    """Stop orders the robot placed / moved / cancelled in this run. A trailing move is logged as
+    stop_placed (new) then stop_cancelled why=trail (old); older runs logged it the other way round."""
+    out, pending_trail, placed = [], set(), {}   # placed: ticker -> index of its "выставлена" line
     for e, detail in events:
         f = fields(detail)
         tk = f.get("ticker", "?")
@@ -103,7 +104,11 @@ def order_messages(events: list[tuple[str, str]]) -> list[str]:
             continue
         if e == "stop_cancelled":
             if f.get("why") == "trail":
-                pending_trail.add(tk)
+                if tk in placed:
+                    i = placed.pop(tk)
+                    out[i] = out[i].replace("🛡 Стоп-заявка выставлена", "🛡 Стоп передвинут")
+                else:
+                    pending_trail.add(tk)
             elif f.get("why") != "exit":  # an exit is reported as the closing trade
                 out.append(f"✖️ Стоп-заявка снята {tk}: {f.get('why', '')}")
         elif e == "stop_placed":
@@ -112,6 +117,7 @@ def order_messages(events: list[tuple[str, str]]) -> list[str]:
                 pending_trail.discard(tk)
                 out.append(f"🛡 Стоп передвинут {tk}: {side} {f.get('qty')} по {f.get('price')}")
             else:
+                placed[tk] = len(out)
                 out.append(f"🛡 Стоп-заявка выставлена {tk}: {side} {f.get('qty')} по {f.get('price')}")
     out += [f"✖️ Стоп-заявка снята {tk}: перенос стопа не завершён" for tk in sorted(pending_trail)]
     return out

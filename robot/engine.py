@@ -112,6 +112,31 @@ class Engine:
         self.log("stop_placed", ticker=inst.ticker, side=side, qty=qty, price=inst.round_price(price))
         return sid
 
+    def _replace_stop(self, inst, side, qty, price, key, old, why) -> bool:
+        """Place the new stop first, then cancel the old ones, so the position is never left
+        without protection: if the new stop is rejected, the old one stays. For a second or so
+        both are active; a stop the cancel missed is removed as a duplicate on the next pass."""
+        try:
+            self._stop(inst, side, qty, price, key)
+        except Exception as e:
+            self.log("error", ticker=inst.ticker,
+                     error=f"new stop {inst.round_price(price):g} not placed, old stop kept: {type(e).__name__}: {e}")
+            return False
+        for s in old:
+            try:
+                self._cancel(inst, s.id, why)
+            except Exception as e:
+                self.log("warn", ticker=inst.ticker, why=f"old stop not cancelled ({type(e).__name__}: {e}), "
+                                                         "removed as a duplicate on the next pass")
+        return True
+
+    def _filled(self, inst, side: int) -> int:
+        """Contracts actually held on `side` after an order: the broker's position, not the request."""
+        if self.dry:
+            return 0
+        q = self.broker.holding(inst).qty
+        return abs(q) if q * side > 0 else 0
+
     def _cancel(self, inst, stop_id, why):
         if self.dry:
             self.log("would_cancel_stop", ticker=inst.ticker, why=why)
@@ -271,9 +296,14 @@ class Engine:
                 self._cancel(inst, s.id, "duplicate stop")
             stop_price = prot[0].price if prot else sst.get("stop")
             if prot and prot[0].qty != abs(h.qty):
-                self._cancel(inst, prot[0].id, "stop qty mismatch")
-                prot = []
-            if not prot:
+                if market_open():
+                    self._replace_stop(inst, -side, abs(h.qty), stop_price,
+                                       order_key(self.cfg.account_id, inst.uid, "requantity", now.isoformat()),
+                                       prot[:1], "stop qty mismatch")
+                else:
+                    self.log("warn", ticker=inst.ticker,
+                             why=f"stop for {prot[0].qty} vs position {abs(h.qty)}, market closed")
+            elif not prot:
                 if stop_price is None:
                     ind = strat.prepare(bars)
                     a = (ind.get("atr") or [None])[-1] or (bars[-1].h - bars[-1].l)
@@ -315,9 +345,16 @@ class Engine:
                 self.log("blocked", ticker=inst.ticker, action="exit", why="market closed")
                 sst["last_bar"] = None  # retry on the next run
                 return 0.0
-            for s in self.broker.stops(inst):
+            old = self.broker.stops(inst)
+            for s in old:
                 self._cancel(inst, s.id, "exit")
             self._market(inst, -pos.side, pos.qty, order_key(*tag, "exit"), act.reason)
+            left = self._filled(inst, pos.side)
+            if left:   # partly filled: protect the rest with the old stop price, retry next bar
+                self.log("error", ticker=inst.ticker, error=f"exit filled partly, {left} left; stop restored")
+                self._stop(inst, -pos.side, left, pos.stop, order_key(*tag, "exit_rest"))
+                sst["last_bar"] = None
+                return -(pos.qty - left) * inst.go
             sst.update(side=0, stop=None, entry_time=None)
             return -pos.qty * inst.go
 
@@ -326,10 +363,9 @@ class Engine:
             if pos.stop is None or (new - pos.stop) * pos.side >= inst.step - 1e-9:
                 if not market_open():
                     return 0.0
-                for s in self.broker.stops(inst):
-                    self._cancel(inst, s.id, "trail")
-                self._stop(inst, -pos.side, pos.qty, new, order_key(*tag, "trail"))
-                sst["stop"] = new
+                if self._replace_stop(inst, -pos.side, pos.qty, new, order_key(*tag, "trail"),
+                                      self.broker.stops(inst), "trail"):
+                    sst["stop"] = new
             return 0.0
 
         if act.kind == "enter" and not pos.side:
@@ -358,6 +394,13 @@ class Engine:
                 self.log("signal_skipped", ticker=inst.ticker, side=act.side, reason=act.reason, why=note)
                 return 0.0
             self._market(inst, act.side, qty, order_key(*tag, "enter"), act.reason)
+            if not self.dry:
+                filled = self._filled(inst, act.side)
+                if filled != qty:
+                    self.log("warn", ticker=inst.ticker, why=f"entry filled {filled} of {qty}")
+                if not filled:
+                    return 0.0
+                qty = filled
             try:
                 self._stop(inst, -act.side, qty, act.stop, order_key(*tag, "stop"))
             except Exception as e:
@@ -394,16 +437,17 @@ class Engine:
             tag = (self.cfg.account_id or "paper", old.uid, front.uid, "roll", now.strftime("%Y-%m-%d"))
             self._market(old, -side, abs(h.qty), order_key(*tag, "close"), f"roll to {front.ticker}")
             self._market(front, side, abs(h.qty), order_key(*tag, "open"), f"roll from {old.ticker}")
-            if old_stop is not None:
+            qty = abs(h.qty) if self.dry else self._filled(front, side)
+            if old_stop is not None and qty:
                 new_stop = front.round_price(old_stop + last[front.uid] - last[old.uid])
                 try:
-                    self._stop(front, -side, abs(h.qty), new_stop, order_key(*tag, "stop"))
+                    self._stop(front, -side, qty, new_stop, order_key(*tag, "stop"))
                 except Exception as e:
                     self.log("error", ticker=front.ticker, error=f"stop after roll failed, closing: {e}")
-                    self._market(front, -side, abs(h.qty), order_key(*tag, "abort"), "stop placement failed")
+                    self._market(front, -side, qty, order_key(*tag, "abort"), "stop placement failed")
                     continue
                 sst["stop"] = new_stop
-            self.log("rolled", frm=old.ticker, to=front.ticker, side=side, qty=abs(h.qty))
+            self.log("rolled", frm=old.ticker, to=front.ticker, side=side, qty=qty)
 
     # ---- manual controls ---------------------------------------------------
     def resize(self, now: datetime | None = None) -> list[str]:
@@ -443,13 +487,17 @@ class Engine:
                 self.log("warn", ticker=inst.ticker, why="market closed, not resized")
                 margin += abs(h.qty) * inst.go
                 continue
-            for s in self.broker.stops(inst):
-                self._cancel(inst, s.id, "resize")
             tag = (self.cfg.account_id or "paper", inst.uid, now.isoformat())
+            old = self.broker.stops(inst)
+            if want:   # the smaller stop goes in first; the big one goes once the excess is sold
+                if not self._replace_stop(inst, -side, want, stop, order_key(*tag, "resize_stop"), [], "resize"):
+                    margin += abs(h.qty) * inst.go
+                    continue
             self._market(inst, -side, abs(h.qty) - want, order_key(*tag, "resize"),
                          f"resize to {want} for capital {risk.capital_rub:.0f} ({note})")
+            for s in old:
+                self._cancel(inst, s.id, "resize")
             if want:
-                self._stop(inst, -side, want, stop, order_key(*tag, "resize_stop"))
                 margin += want * inst.go
             else:
                 sst.update(side=0, stop=None, entry_time=None)
