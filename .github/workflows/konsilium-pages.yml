@@ -1,11 +1,16 @@
-name: Publish Pages (Konsilium + bonds + placements)
+name: Publish Pages (Konsilium + bonds + placements + trader)
 
-# Publishes konsilium/ at the site root, bonds/ at /bonds/ and placements/ at /placements/.
+# Publishes konsilium/ at the site root, bonds/ at /bonds/, placements/ at /placements/ and the
+# «Помощник трейдера» app at /trader/ (its data.json is built here from the T-Invest account:
+# hourly on weekdays during the session and after the evening clearing).
 # The trading robot code is not part of the site.
 on:
   push:
     branches: [main]
-    paths: ["konsilium/**", "bonds/**", "placements/**", ".github/workflows/konsilium-pages.yml"]
+    paths: ["konsilium/**", "bonds/**", "placements/**", "trader/**", ".github/workflows/konsilium-pages.yml"]
+  schedule:
+    - cron: "41 7-16 * * 1-5"   # 10:41-19:41 MSK, after the robot's passes
+    - cron: "23 21 * * 1-5"     # 00:23 MSK, after the evening clearing
   workflow_dispatch:
 
 permissions:
@@ -34,6 +39,17 @@ jobs:
           cp -r bonds/. _site/bonds/
           mkdir -p _site/placements
           cp -r placements/. _site/placements/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Trader app (data from the T-Invest account)
+        continue-on-error: true      # an API hiccup must not block the other pages
+        env:
+          TINVEST_TOKEN: ${{ secrets.TINVEST_TOKEN }}
+        run: |
+          mkdir -p _site/trader
+          cp trader/index.html _site/trader/
+          python3 trader/build_data.py --out _site/trader/data.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

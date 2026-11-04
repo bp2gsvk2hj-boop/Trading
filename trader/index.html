@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#21A038">
+<title>Помощник трейдера</title>
+<meta name="description" content="Анализ сделок по счёту в Т‑Инвестициях: результат, срезы торговли, качество входов и выходов, рекомендации.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --green:#21A038; --green-600:#1A8A2F; --green-700:#107A2B; --green-50:#E8F6EB; --green-100:#D2EDD8;
+  --red:#E5383B; --red-50:#FDECEC; --amber:#F5A623; --amber-50:#FFF4E0; --blue:#2F80ED; --blue-50:#EAF2FE;
+  --bg:#F2F4F7; --card:#FFFFFF; --text:#1F1F22; --muted:#7D838A; --line:#E6E8EB; --chip:#EEF0F3; --track:#EEF0F3;
+  --shadow:0 1px 2px rgba(16,24,40,.04),0 2px 8px rgba(16,24,40,.04);
+  --r:16px; --r-sm:12px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --green:#2FB84A; --green-600:#33C351; --green-700:#5ED27A; --green-50:#173322; --green-100:#1E4029;
+  --red:#FF5A5F; --red-50:#3A1C1E; --amber:#F7B547; --amber-50:#3A2E17; --blue:#5B9BFF; --blue-50:#1A2840;
+  --bg:#0F1114; --card:#1A1D21; --text:#F1F2F4; --muted:#9AA1A9; --line:#2A2E34; --chip:#24282E; --track:#2A2E34;
+  --shadow:none;}}
+:root[data-theme="dark"]{
+  --green:#2FB84A; --green-600:#33C351; --green-700:#5ED27A; --green-50:#173322; --green-100:#1E4029;
+  --red:#FF5A5F; --red-50:#3A1C1E; --amber:#F7B547; --amber-50:#3A2E17; --blue:#5B9BFF; --blue-50:#1A2840;
+  --bg:#0F1114; --card:#1A1D21; --text:#F1F2F4; --muted:#9AA1A9; --line:#2A2E34; --chip:#24282E; --track:#2A2E34;
+  --shadow:none;}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+body{min-height:100vh}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+.num{font-variant-numeric:tabular-nums}
+.pos{color:var(--green-600)} .neg{color:var(--red)} .muted{color:var(--muted)}
+/* layout */
+.app{display:flex;min-height:100vh}
+.side{display:none}
+.main{flex:1;min-width:0;padding:0 16px calc(84px + env(safe-area-inset-bottom));max-width:1180px;margin:0 auto}
+header.top{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 0 8px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px}
+.logo{width:28px;height:28px;border-radius:9px;background:var(--green);display:grid;place-items:center;color:#fff}
+h1{font-size:22px;margin:10px 0 10px;font-weight:700;letter-spacing:-.01em}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.seg{display:inline-flex;background:var(--chip);border-radius:999px;padding:3px}
+.seg button{padding:7px 14px;border-radius:999px;font-weight:500;font-size:14px;color:var(--muted)}
+.seg button.on{background:var(--green);color:#fff}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:13px;color:var(--muted)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-top:12px}
+.tabs button{padding:10px 14px;font-weight:500;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button.on{color:var(--green-700);border-color:var(--green)}
+.grid{display:grid;gap:12px;margin-top:12px}
+.card{background:var(--card);border-radius:var(--r);padding:16px;box-shadow:var(--shadow)}
+.card h3{margin:0 0 10px;font-size:16px;font-weight:600}
+.card .sub{font-size:12.5px;color:var(--muted);margin:-6px 0 10px}
+.kpi{font-size:32px;font-weight:700;letter-spacing:-.02em}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:600;padding:3px 8px;border-radius:8px;background:var(--green-50);color:var(--green-700)}
+.badge.neg{background:var(--red-50);color:var(--red)} .badge.warn{background:var(--amber-50);color:#B26A00}
+.row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+.row:last-child{border-bottom:0}
+.row.total{font-weight:700;background:var(--green-50);margin:6px -10px 0;padding:9px 10px;border-radius:10px;border:0}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 14px}
+.stat .l{font-size:12.5px;color:var(--muted)} .stat .v{font-size:18px;font-weight:600}
+.two{display:grid;gap:12px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{font-weight:500;color:var(--muted);text-align:right;padding:6px 4px;font-size:12.5px}
+th:first-child,td:first-child{text-align:left}
+td{text-align:right;padding:9px 4px;border-top:1px solid var(--line)}
+.note{display:flex;gap:10px;align-items:flex-start;background:var(--blue-50);border-radius:var(--r-sm);padding:10px 12px;font-size:13px;margin-top:10px}
+.note.warn{background:var(--amber-50)} .note.bad{background:var(--red-50)} .note.good{background:var(--green-50)}
+.note b{display:block;font-size:13.5px;margin-bottom:2px}
+.ico{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700;color:#fff;background:var(--blue)}
+.note.warn .ico{background:var(--amber)} .note.bad .ico{background:var(--red)} .note.good .ico{background:var(--green)}
+.bars .b{display:grid;grid-template-columns:112px 1fr 100px;gap:10px;align-items:center;font-size:13.5px;padding:5px 0}
+.track{height:12px;border-radius:6px;background:var(--track);position:relative;overflow:hidden}
+.fill{position:absolute;top:0;bottom:0;border-radius:6px}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:12px}
+.cal .h{color:var(--muted);text-align:center;padding-bottom:2px}
+.cal .c{aspect-ratio:1.25;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--chip);color:var(--muted)}
+.cal .c b{font-weight:600;color:var(--text);font-size:12px}
+.cal .c i{font-style:normal;font-size:10px}
+.cal .e{background:transparent}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;background:var(--green);color:#fff;font-weight:600;border-radius:12px;padding:13px;margin-top:12px}
+.btn.ghost{background:var(--chip);color:var(--text)}
+.link{color:var(--green-700);font-weight:500;font-size:13.5px}
+.list .it{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line);cursor:pointer}
+.list .it:first-child{border-top:0}
+.tag{font-size:11.5px;padding:2px 7px;border-radius:6px;background:var(--chip);color:var(--muted);white-space:nowrap}
+.tag.stop{background:var(--red-50);color:var(--red)} .tag.ok{background:var(--green-50);color:var(--green-700)} .tag.ab{background:var(--amber-50);color:#B26A00}
+svg text{font-family:inherit}
+.legend{display:flex;gap:14px;font-size:12.5px;color:var(--muted);margin-top:6px;flex-wrap:wrap}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+nav.bottom{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:6px 0 calc(6px + env(safe-area-inset-bottom));z-index:10}
+nav.bottom button{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--muted);min-width:64px}
+nav.bottom button.on{color:var(--green-700)}
+nav svg{width:24px;height:24px}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;z-index:20;align-items:flex-end;justify-content:center}
+.sheet.on{display:flex}
+.sheet .panel{background:var(--card);width:100%;max-width:640px;border-radius:20px 20px 0 0;padding:18px 16px calc(20px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
+.x{float:right;font-size:22px;color:var(--muted);line-height:1}
+.empty{color:var(--muted);font-size:14px;padding:8px 0}
+.foot{font-size:12px;color:var(--muted);margin:16px 0}
+@media (min-width:720px){
+  .two{grid-template-columns:1fr 1fr}
+  .stats{grid-template-columns:repeat(4,1fr)}
+}
+@media (min-width:1000px){
+  .side{display:flex;flex-direction:column;gap:4px;width:232px;flex:none;padding:18px 12px;position:sticky;top:0;height:100vh;background:var(--card);border-right:1px solid var(--line)}
+  .side .brand{padding:0 10px 16px}
+  .side button{display:flex;align-items:center;gap:12px;padding:10px;border-radius:10px;color:var(--muted);font-weight:500;text-align:left}
+  .side button.on{background:var(--green-50);color:var(--green-700)}
+  .side svg{width:22px;height:22px}
+  nav.bottom{display:none}
+  .main{padding:0 28px 28px}
+  header.top .brand{display:none}
+  .grid.cols{grid-template-columns:1.25fr 1fr}
+  .sheet{align-items:center}
+  .sheet .panel{border-radius:20px}
+  .cal .c{aspect-ratio:auto;height:46px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <main class="main">
+    <header class="top">
+      <div class="brand"><span class="logo">%</span>Помощник трейдера</div>
+      <h1 id="title">Перформанс‑монитор</h1>
+      <div class="filters">
+        <div class="seg" id="period"></div>
+        <span class="chip" id="acct">Т‑Инвестиции · робот</span>
+      </div>
+    </header>
+    <section id="view"></section>
+    <div class="foot" id="foot"></div>
+  </main>
+</div>
+<nav class="bottom" id="bottom"></nav>
+<div class="sheet" id="sheet"><div class="panel" id="panel"></div></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const MSK = 3 * 3600e3;
+const ICONS = {
+  home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>',
+  slices:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+  profile:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z"/></svg>',
+  journal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h11a2 2 0 0 1 2 2v16H7a2 2 0 0 1-2-2V4a1 1 0 0 1 1-1z"/><path d="M9 8h7M9 12h7M9 16h4"/></svg>',
+};
+const VIEWS = [["home","Обзор","Перформанс‑монитор"],["slices","Срезы","На чём зарабатываю"],
+               ["profile","Профиль","Мой торговый профиль"],["journal","Журнал","Журнал сделок"]];
+const KIND = {stop:["по стопу","stop"], strategy:["по стратегии","ok"], cut:["частями","ok"], abort:["отменён","ab"]};
+const WD = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+let D = null, state = {view:"home", period:"all", slice:"inst"};
+try { const s = JSON.parse(localStorage.getItem("ta-state")||"{}"); Object.assign(state, s); } catch(e){}
+
+// ---------- formatting
+const nf0 = new Intl.NumberFormat("ru-RU",{maximumFractionDigits:0});
+const rub = (x, sign=true) => (sign && x > 0.5 ? "+" : x < -0.5 ? "−" : "") + nf0.format(Math.abs(Math.round(x))) + " ₽";
+const pct = (x, d=1) => (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x*100).toFixed(d).replace(".",",") + "%";
+const cls = x => x > 0.5 ? "pos" : x < -0.5 ? "neg" : "";
+const pf = x => x === Infinity ? "∞" : isFinite(x) ? x.toFixed(2).replace(".",",") : "—";
+const msk = s => new Date(new Date(s).getTime() + MSK);
+const dshort = s => { const d = msk(s); return `${String(d.getUTCDate()).padStart(2,"0")}.${String(d.getUTCMonth()+1).padStart(2,"0")}`; };
+const dtime = s => { const d = msk(s); return `${dshort(s)} ${String(d.getUTCHours()).padStart(2,"0")}:${String(d.getUTCMinutes()).padStart(2,"0")}`; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ---------- period & stats
+function periodStart() {
+  if (!D) return null;
+  const now = new Date(D.generated);
+  if (state.period === "week") return new Date(now.getTime() - 7*864e5);
+  if (state.period === "month") return new Date(now.getTime() - 30*864e5);
+  return new Date(D.start);
+}
+function tradesIn() { const s = periodStart(); return D.trades.filter(t => new Date(t.exit_t) >= s); }
+function daysIn() {
+  const s = periodStart(), key = new Date(s.getTime() + MSK).toISOString().slice(0,10);
+  const ds = D.days.filter(d => d.d >= key);
+  return ds.length ? ds : D.days.slice(-1);
+}
+function stats(ts) {
+  const real = ts.filter(t => t.exit_kind !== "abort");
+  const w = real.filter(t => t.net > 0), l = real.filter(t => t.net <= 0);
+  const sw = w.reduce((a,t)=>a+t.net,0), sl = l.reduce((a,t)=>a+t.net,0);
+  const net = ts.reduce((a,t)=>a+t.net,0), gross = ts.reduce((a,t)=>a+t.gross,0), fees = ts.reduce((a,t)=>a+t.fees,0);
+  return {n: ts.length, real: real.length, wins: w.length, win: real.length ? w.length/real.length : 0,
+          pf: sl < 0 ? sw / -sl : (sw > 0 ? Infinity : NaN), net, gross, fees,
+          avg: real.length ? real.reduce((a,t)=>a+t.net,0)/real.length : 0,
+          avgW: w.length ? sw/w.length : 0, avgL: l.length ? sl/l.length : 0};
+}
+function group(ts, keyf) {
+  const m = new Map();
+  for (const t of ts) { const k = keyf(t); if (!m.has(k)) m.set(k, []); m.get(k).push(t); }
+  return [...m.entries()].map(([k, v]) => ({k, s: stats(v), ts: v})).sort((a,b) => b.s.net - a.s.net);
+}
+const hourBucket = t => { const h = msk(t.entry_t).getUTCHours();
+  return h < 10 ? "до 10:00" : h < 12 ? "10:00–12:00" : h < 15 ? "12:00–15:00" : h < 18 ? "15:00–18:00" : "после 18:00"; };
+const HOUR_ORDER = ["до 10:00","10:00–12:00","12:00–15:00","15:00–18:00","после 18:00"];
+const setupOf = t => t.exit_kind === "abort" ? "Отменённый вход" : t.after_stop ? "Повторный вход после стопа"
+                  : t.side > 0 ? "Пробой вверх · лонг" : "Пробой вниз · шорт";
+const holdOf = t => { const h = (new Date(t.exit_t) - new Date(t.entry_t))/36e5;
+  return h < 1 ? "до 1 часа" : h < 24 ? "1–24 часа" : h < 72 ? "1–3 дня" : "больше 3 дней"; };
+const sideRu = s => s > 0 ? "лонг" : "шорт";
+
+function risk(ds) {
+  if (ds.length < 2) return {dd:0, rec:null, sharpe:NaN, days:ds.length};
+  let peak = ds[0].twr, dd = 0, trough = 0, peakAt = 0, ddPeakAt = 0;
+  ds.forEach((d,i) => { if (d.twr > peak) { peak = d.twr; peakAt = i; }
+    const x = d.twr/peak - 1; if (x < dd) { dd = x; trough = i; ddPeakAt = peakAt; } });
+  let rec = null;
+  if (dd < 0) { const top = ds[ddPeakAt].twr; for (let i = trough; i < ds.length; i++) if (ds[i].twr >= top) { rec = i - trough; break; } }
+  const r = []; for (let i = 1; i < ds.length; i++) { const wd = new Date(ds[i].d+"T12:00:00Z").getUTCDay(); if (wd && wd < 6) r.push(ds[i].twr/ds[i-1].twr - 1); }
+  const m = r.reduce((a,x)=>a+x,0)/(r.length||1), sd = Math.sqrt(r.reduce((a,x)=>a+(x-m)**2,0)/((r.length-1)||1));
+  return {dd, rec, sharpe: sd > 0 ? m/sd*Math.sqrt(252) : NaN, days: r.length};
+}
+function mwr(ds) {     // IRR of the period: start value, flows, value now
+  if (ds.length < 2) return 0;
+  const t0 = new Date(ds[0].d).getTime(), cf = [[0, -ds[0].value]];
+  for (const d of ds.slice(1)) if (d.flow) cf.push([(new Date(d.d).getTime()-t0)/864e5, -d.flow]);
+  const T = (new Date(ds[ds.length-1].d).getTime()-t0)/864e5; cf.push([T, ds[ds.length-1].value]);
+  const npv = r => cf.reduce((a,[t,x]) => a + x/Math.pow(1+r,t), 0);
+  let lo = -0.5, hi = 1; if (npv(lo)*npv(hi) > 0) return NaN;
+  for (let i = 0; i < 120; i++) { const m = (lo+hi)/2; if (npv(lo)*npv(m) <= 0) hi = m; else lo = m; }
+  return Math.pow(1+(lo+hi)/2, T) - 1;
+}
+
+// ---------- charts (inline SVG); drawn at about the on-screen width so text stays readable
+const CW = () => Math.round(Math.min(640, Math.max(320, (document.querySelector(".card")?.clientWidth || innerWidth - 32) - 32)));
+function lineChart(series, opts={}) {
+  const W = CW(), H = opts.h || 200, P = {l:36, r:44, t:10, b:22};
+  const all = series.flatMap(s => s.pts.map(p => p[1])).filter(v => v != null);
+  if (!all.length) return '<div class="empty">Нет данных</div>';
+  let lo = Math.min(...all), hi = Math.max(...all); if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
+  const pad = (hi-lo)*0.08; lo -= pad; hi += pad;
+  const n = Math.max(...series.map(s => s.pts.length));
+  const x = i => P.l + (W-P.l-P.r) * (n > 1 ? i/(n-1) : 0.5), y = v => P.t + (H-P.t-P.b) * (1 - (v-lo)/(hi-lo));
+  let g = "";
+  for (let k = 0; k <= 4; k++) { const v = lo + (hi-lo)*k/4;
+    g += `<line x1="${P.l}" x2="${W-P.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${P.l-6}" y="${y(v)+4}" font-size="11" fill="var(--muted)" text-anchor="end">${(opts.fmt||(v=>v.toFixed(1)))(v)}</text>`; }
+  const lbl = series[0].pts, step = Math.max(1, Math.ceil(lbl.length/5));
+  lbl.forEach((p,i) => { if (i % step === 0 || i === lbl.length-1) g += `<text x="${x(i)}" y="${H-5}" font-size="11" fill="var(--muted)" text-anchor="middle">${p[0]}</text>`; });
+  for (const s of series) {
+    const d = s.pts.map((p,i) => p[1] == null ? "" : `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+    if (s.area) g += `<path d="${d}L${x(s.pts.length-1)},${H-P.b}L${x(0)},${H-P.b}Z" fill="${s.color}" opacity=".08"/>`;
+    g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.w||2}" stroke-linejoin="round" ${s.dash?'stroke-dasharray="4 4"':""}/>`;
+    const last = s.pts[s.pts.length-1]; if (last && last[1] != null)
+      g += `<circle cx="${x(s.pts.length-1)}" cy="${y(last[1])}" r="3.5" fill="${s.color}"/><text x="${x(s.pts.length-1)+6}" y="${y(last[1])+4}" font-size="11.5" font-weight="600" fill="${s.color}">${(opts.fmt||(v=>v.toFixed(1)))(last[1])}</text>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(opts.label||"График")}">${g}</svg>`;
+}
+function bars(rows) {        // rows: [label, value]
+  const m = Math.max(1, ...rows.map(r => Math.abs(r[1])));
+  return `<div class="bars">${rows.map(([l,v,n]) => `<div class="b"><span>${esc(l)}</span>
+    <div class="track"><div class="fill" style="left:0;width:${Math.max(3, Math.abs(v)/m*100)}%;background:${v >= 0 ? "var(--green)" : "var(--red)"}"></div></div>
+    <span class="num ${cls(v)}" style="text-align:right">${rub(v)}${n != null ? ` <span class="muted">· ${n}</span>` : ""}</span></div>`).join("")}</div>`;
+}
+function tradeChart(t) {
+  if (!t.path || t.path.length < 2) return '<div class="empty">Сделка слишком короткая для графика</div>';
+  const W = CW(), H = Math.round(Math.max(180, W*0.48)), P = {l:8, r:8, t:20, b:22};
+  const v = t.path.map(p => p[1]), k = t.pv * t.qty;
+  const mae = t.entry + t.side * t.mae / k, mfe = t.entry + t.side * t.mfe / k;
+  const lo0 = Math.min(...v, t.entry, t.exit, mae, mfe), hi0 = Math.max(...v, t.entry, t.exit, mae, mfe);
+  const pad = (hi0-lo0)*0.06 || 1, lo = lo0-pad, hi = hi0+pad;
+  const x = i => P.l + (W-P.l-P.r)*i/(v.length-1), y = p => P.t + (H-P.t-P.b)*(1-(p-lo)/(hi-lo));
+  const d = v.map((p,i) => `${i?"L":"M"}${x(i).toFixed(1)},${y(p).toFixed(1)}`).join("");
+  const lab = (lvl, txt, col) => `<text x="${W-P.r-4}" y="${y(lvl) + (lvl >= t.entry ? -5 : 13)}" font-size="12" font-weight="600" fill="${col}" text-anchor="end">${txt}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Движение цены в сделке">
+    <rect x="${P.l}" width="${W-P.l-P.r}" y="${Math.min(y(t.entry),y(mae))}" height="${Math.abs(y(mae)-y(t.entry))}" fill="var(--red)" opacity=".10"/>
+    <rect x="${P.l}" width="${W-P.l-P.r}" y="${Math.min(y(t.entry),y(mfe))}" height="${Math.abs(y(mfe)-y(t.entry))}" fill="var(--green)" opacity=".10"/>
+    <line x1="${P.l}" x2="${W-P.r}" y1="${y(t.entry)}" y2="${y(t.entry)}" stroke="var(--muted)" stroke-dasharray="4 4"/>
+    <path d="${d}" fill="none" stroke="var(--green)" stroke-width="2"/>
+    <circle cx="${x(0)}" cy="${y(v[0])}" r="4.5" fill="var(--green-700)"/><circle cx="${x(v.length-1)}" cy="${y(t.exit)}" r="4.5" fill="${t.net>=0?"var(--green)":"var(--red)"}"/>
+    ${t.mfe ? lab(t.side > 0 ? mfe : mae, "MFE " + rub(t.mfe), "var(--green-700)") : ""}
+    ${t.mae ? lab(t.side > 0 ? mae : mfe, "MAE " + rub(t.mae), "var(--red)") : ""}
+    <text x="${W-P.r}" y="${H-5}" font-size="11" fill="var(--muted)" text-anchor="end">выход ${dtime(t.exit_t)}</text>
+    <text x="${P.l}" y="${H-5}" font-size="11" fill="var(--muted)">вход ${dtime(t.entry_t)}</text></svg>`;
+}
+function calendar(ds) {
+  const byDay = new Map(D.days.map(d => [d.d, d]));
+  const months = [...new Set(ds.map(d => d.d.slice(0,7)))];
+  const m = Math.max(1, ...ds.map(d => Math.abs(d.pnl)));
+  return months.map(ym => {
+    const [Y, M] = ym.split("-").map(Number), first = new Date(Date.UTC(Y, M-1, 1)), nd = new Date(Date.UTC(Y, M, 0)).getUTCDate();
+    let cells = WD.map(w => `<div class="h">${w}</div>`).join("");
+    for (let i = 0; i < (first.getUTCDay()+6)%7; i++) cells += '<div class="c e"></div>';
+    for (let day = 1; day <= nd; day++) {
+      const key = `${ym}-${String(day).padStart(2,"0")}`, d = byDay.get(key);
+      if (!d) { cells += `<div class="c" style="opacity:.45"><b>${day}</b></div>`; continue; }
+      const a = Math.min(1, Math.abs(d.pnl)/m), bg = Math.abs(d.pnl) < 1 ? "var(--chip)"
+        : d.pnl > 0 ? `color-mix(in srgb, var(--green) ${12+a*55}%, var(--card))` : `color-mix(in srgb, var(--red) ${12+a*55}%, var(--card))`;
+      cells += `<div class="c" style="background:${bg}" title="${key}: ${rub(d.pnl)}"><b>${day}</b>${Math.abs(d.pnl)>=1?`<i>${nf0.format(Math.round(d.pnl))}</i>`:""}</div>`;
+    }
+    const name = first.toLocaleDateString("ru-RU",{month:"long",year:"numeric",timeZone:"UTC"});
+    return `<div class="muted" style="font-size:13px;margin:6px 0">${name[0].toUpperCase()+name.slice(1)}</div><div class="cal">${cells}</div>`;
+  }).join("");
+}
+
+// ---------- insights / recommendations
+function insights(ts, ds) {
+  const out = [], s = stats(ts), small = s.real < 20;
+  const inst = group(ts.filter(t => t.exit_kind !== "abort"), t => t.ticker);
+  if (inst.length) {
+    const b = inst[0], w = inst[inst.length-1];
+    if (b.s.net > 0) out.push({type:"good", title:"Сильная сторона", text:`${b.k}: ${rub(b.s.net)} · ${b.s.n} ${pl(b.s.n)}, профит‑фактор ${pf(b.s.pf)}`});
+    if (inst.length > 1 && w.s.net < 0) out.push({type:"bad", title:"Зона внимания", text:`${w.k}: ${rub(w.s.net)} · ${w.s.n} ${pl(w.s.n)}`});
+  }
+  const ab = ts.filter(t => t.exit_kind === "abort");
+  if (ab.length) out.push({type:"warn", title:`Отменённые входы: ${ab.length}`, text:`Позиция открывалась и сразу закрывалась (стоп не принят биржей). Потери на комиссиях ${rub(-ab.reduce((a,t)=>a+t.fees,0))}. С 29.10 робот проверяет текущую цену и лимиты биржи перед входом.`});
+  const re = ts.filter(t => t.after_stop && t.exit_kind !== "abort");
+  if (re.length) { const n = re.reduce((a,t)=>a+t.net,0);
+    out.push({type: n < 0 ? "bad" : "info", title:"Повторный вход после стопа", text:`${re.length} ${pl(re.length)} в течение часа после стопа по тому же инструменту: ${rub(n)}. Это связь в истории, а не доказанная причина.`}); }
+  const gw = ts.filter(t => t.gross > 0).reduce((a,t)=>a+t.gross,0);
+  if (gw > 0 && s.fees/gw > 0.15) out.push({type:"warn", title:"Комиссии съедают прибыль", text:`Комиссии ${rub(-s.fees)} — ${Math.round(s.fees/gw*100)}% от прибыльных сделок до комиссий. Крупные позиции на коротком движении почти не оставляют результата.`});
+  const giveBack = ts.filter(t => t.mfe > 0 && t.net < 0 && t.mfe > Math.abs(t.net));
+  if (giveBack.length) out.push({type:"info", title:"Отданная прибыль", text:`Сделок, которые были в плюсе (до ${rub(Math.max(...giveBack.map(t=>t.mfe)))}), но закрылись в минусе: ${giveBack.length}. Для трендовой стратегии это нормально, но стоит сравнить на истории более ранний перенос стопа в безубыток.`});
+  const winners = ts.filter(t => t.net > 0 && t.mfe > 0);
+  if (winners.length) { const eff = winners.reduce((a,t)=>a+t.gross/t.mfe,0)/winners.length;
+    out.push({type:"info", title:"Эффективность выхода", text:`Прибыльные сделки забрали в среднем ${Math.round(eff*100)}% максимального хода цены (MFE).`}); }
+  const hb = group(ts.filter(t => t.exit_kind !== "abort"), hourBucket);
+  if (hb.length > 1 && hb[hb.length-1].s.net < 0) out.push({type:"info", title:"Время входа", text:`Лучше всего: ${hb[0].k} (${rub(hb[0].s.net)}). Хуже всего: ${hb[hb.length-1].k} (${rub(hb[hb.length-1].s.net)}).`});
+  if (small) out.push({type:"info", title:"Мало наблюдений", text:`${s.real} ${pl(s.real)} — выводы предварительные. Надёжная статистика начинается примерно с 30–50 сделок.`});
+  return out;
+}
+function actions(ts) {
+  const a = [];
+  for (const p of D.positions) if (!p.stops.length) a.push({type:"bad", title:`По ${p.ticker} нет стоп‑заявки`, text:"Позиция открыта без защиты. Проверьте робота: он восстанавливает стоп на ближайшем проходе."});
+  const abort = ts.some(t => t.exit_kind === "abort");
+  if (abort) a.push({type:"good", title:"Проверка цены перед входом — сделано", text:"С 29.10 робот не входит, если цена уже за стопом или стоп вне лимитов биржи."});
+  const re = ts.filter(t => t.after_stop && t.exit_kind !== "abort");
+  if (re.length && re.reduce((s,t)=>s+t.net,0) < 0) a.push({type:"warn", title:"Проверить правило паузы после стопа", text:"Сравнить на истории вариант: не входить по тому же инструменту 1–2 часа после стопа."});
+  const fund = D.holdings[D.benchmark] || 0;
+  if (D.value > 0 && fund / D.value < 0.5) a.push({type:"info", title:"Свободные деньги", text:`В ${D.benchmark} лежит ${Math.round(fund/D.value*100)}% портфеля. Остальное — рубли без дохода.`});
+  return a;
+}
+const pl = n => { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? "сделка" : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "сделки" : "сделок"; };
+const note = i => `<div class="note ${i.type === "good" ? "good" : i.type === "bad" ? "bad" : i.type === "warn" ? "warn" : ""}"><span class="ico">${i.type === "good" ? "✓" : i.type === "bad" ? "!" : i.type === "warn" ? "!" : "i"}</span><div><b>${esc(i.title)}</b>${esc(i.text)}</div></div>`;
+
+// ---------- views
+function vHome() {
+  const ts = tradesIn(), ds = daysIn(), s = stats(ts), r = risk(ds);
+  const b = ds[0], e = ds[ds.length-1], twr = e.twr/b.twr - 1;
+  const bench = b.bench && e.bench ? e.bench/b.bench - 1 : null, mw = mwr(ds);
+  const pts = ds.map(d => [dshort(d.d+"T09:00:00Z"), d.twr/b.twr*100]);
+  const bpts = ds.map(d => [dshort(d.d+"T09:00:00Z"), d.bench && b.bench ? d.bench/b.bench*100 : null]);
+  const R = D.result, all = state.period === "all";
+  const comp = all ? [["Закрытые сделки", R.closed], ["Открытые позиции", R.open], ["Комиссии по фьючерсам", R.fees_futures],
+                      ["Комиссии по фонду", R.fees_fund], ["Тариф и налоги", R.tariff_tax], [`Доход ${D.benchmark} и прочее`, R.fund_and_other]]
+                   : [["Закрытые сделки (до комиссий)", s.gross], ["Комиссии по сделкам", -s.fees]];
+  const total = all ? R.total : ds.slice(1).reduce((a,d)=>a+d.pnl,0) + (state.period==="all"?0:0);
+  const pos = D.positions.map(p => `<div class="row"><span><b>${esc(p.ticker)}</b> <span class="muted">${sideRu(p.qty)} ${Math.abs(p.qty)} @ ${p.avg}</span></span>
+      <span class="num ${cls(p.pnl)}">${rub(p.pnl)} <span class="tag ${p.stops.length?"ok":"stop"}">${p.stops.length?"стоп "+p.stops.join(", "):"нет стопа"}</span></span></div>`).join("") || '<div class="empty">Открытых позиций нет</div>';
+  return `<div class="grid cols">
+    <div class="card"><h3>Я против рынка</h3>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="kpi num ${cls(twr*1e4)}">${pct(twr)}</span>
+      ${bench != null ? `<span class="badge ${twr-bench<0?"neg":""}">${((twr-bench)*100>=0?"+":"−")+Math.abs((twr-bench)*100).toFixed(1).replace(".",",")} п.п. к ${esc(D.benchmark)}</span>` : ""}</div>
+      <div class="sub" style="margin-top:4px">Доходность TWR после издержек · MWR ${isFinite(mw)?pct(mw):"—"}</div>
+      ${lineChart([{pts, color:"var(--green)", area:true}, {pts:bpts, color:"var(--muted)", dash:true, w:1.6}], {label:"Доходность счёта и фонда денежного рынка", fmt:v=>v.toFixed(1)})}
+      <div class="legend"><span><i class="dot" style="background:var(--green)"></i>Мой счёт ${pct(twr)}</span>${bench!=null?`<span><i class="dot" style="background:var(--muted)"></i>${esc(D.benchmark)} (денежный рынок) ${pct(bench)}</span>`:""}</div>
+      <a class="link" href="#" data-sheet="method">Методика расчёта ›</a></div>
+    <div class="card"><h3>Из чего сложился результат</h3>
+      ${comp.map(([l,v]) => `<div class="row"><span class="muted">${l}</span><span class="num ${cls(v)}">${rub(v)}</span></div>`).join("")}
+      <div class="row total"><span>Чистый результат</span><span class="num ${cls(total)}">${rub(total)}</span></div>
+      <div class="sub" style="margin:8px 0 0">${all ? `Пополнения и выводы не считаются прибылью. Портфель сейчас ${rub(D.value,false)}.` : "За период: только закрытые сделки."}</div></div>
+  </div>
+  <div class="two" style="margin-top:12px">
+    <div class="card"><h3>Результат и риск</h3><div class="stats">
+      <div class="stat"><div class="l">Макс. просадка</div><div class="v num ${r.dd<0?"neg":""}">${pct(r.dd)}</div></div>
+      <div class="stat"><div class="l">Восстановление</div><div class="v">${r.dd>=0?"—":r.rec==null?"не восст.":r.rec+" дн."}</div></div>
+      <div class="stat"><div class="l">Sharpe</div><div class="v num">${isFinite(r.sharpe)&&r.days>=30?r.sharpe.toFixed(2).replace(".",","):"—"}</div></div>
+      <div class="stat"><div class="l">Торговых дней</div><div class="v num">${r.days}</div></div></div>
+      <div class="sub" style="margin:10px 0 0">По дневной доходности TWR. Sharpe считается от 30 торговых дней.</div></div>
+    <div class="card"><h3>Качество закрытых сделок</h3><div class="stats">
+      <div class="stat"><div class="l">Сделок</div><div class="v num">${s.n}</div></div>
+      <div class="stat"><div class="l">Прибыльных</div><div class="v num">${s.real?Math.round(s.win*100)+"%":"—"}</div></div>
+      <div class="stat"><div class="l">Профит‑фактор</div><div class="v num">${pf(s.pf)}</div></div>
+      <div class="stat"><div class="l">Средняя сделка</div><div class="v num ${cls(s.avg)}">${rub(s.avg)}</div></div></div>
+      <div class="sub" style="margin:10px 0 0">После комиссий, без открытых позиций.</div></div>
+  </div>
+  <div class="two" style="margin-top:12px">
+    <div class="card"><h3>P&amp;L по дням</h3>${calendar(ds)}</div>
+    <div class="card"><h3>Открытые позиции</h3>${pos}<button class="btn" data-go="slices">Разобрать результат →</button></div>
+  </div>`;
+}
+function vSlices() {
+  const ts = tradesIn(), real = ts.filter(t => t.exit_kind !== "abort");
+  const seg = [["inst","Инструменты"],["setup","Сетапы"],["time","Время"]];
+  const head = `<div class="seg" style="margin-top:12px">${seg.map(([k,l]) => `<button class="${state.slice===k?"on":""}" data-slice="${k}">${l}</button>`).join("")}</div>`;
+  const tbl = (rows, name) => `<table><thead><tr><th>${name}</th><th>Сделок</th><th>P&amp;L</th><th>PF</th></tr></thead><tbody>
+    ${rows.map(g => `<tr><td>${esc(g.k)}</td><td class="num">${g.s.n}</td><td class="num ${cls(g.s.net)}">${rub(g.s.net)}</td><td class="num">${pf(g.s.pf)}</td></tr>`).join("")}
+    </tbody></table><div class="row total" style="margin-top:8px"><span>Итого: ${ts.length} ${pl(ts.length)}</span><span class="num ${cls(stats(ts).net)}">${rub(stats(ts).net)}</span></div>`;
+  let body = "";
+  if (!ts.length) body = '<div class="card" style="margin-top:12px"><div class="empty">За период закрытых сделок нет</div></div>';
+  else if (state.slice === "inst") {
+    const g = group(ts, t => t.ticker), sides = group(real, t => sideRu(t.side));
+    body = `<div class="card" style="margin-top:12px"><h3>Где моё преимущество</h3>${tbl(g, "Инструмент")}
+      ${g.some(x => x.s.n < 10) ? note({type:"info", title:"Мало наблюдений", text:"Меньше 10 сделок по инструменту — вывод предварительный."}) : ""}</div>
+      <div class="card" style="margin-top:12px"><h3>Лонг и шорт</h3>${bars(sides.map(x => [x.k, x.s.net, x.s.n]))}</div>`;
+  } else if (state.slice === "setup") {
+    const g = group(ts, setupOf), ex = group(real, t => KIND[t.exit_kind][0]);
+    const sb = stats(real);
+    body = `<div class="card" style="margin-top:12px"><h3>Где моё преимущество</h3>${tbl(g, "Сетап")}
+      ${note({type:"info", title:"Сетапы размечены автоматически", text:"Вход робота — пробой 20‑часового канала по тренду EMA(200). Повторный вход — в течение часа после стопа по тому же инструменту."})}</div>
+      <div class="two" style="margin-top:12px">
+      <div class="card"><h3>Разбор: пробой</h3><div class="sub">${sb.real} ${pl(sb.real)} · после комиссий</div><div class="stats" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat"><div class="l">Средняя прибыль</div><div class="v num pos">${rub(sb.avgW)}</div></div>
+        <div class="stat"><div class="l">Средний убыток</div><div class="v num neg">${rub(sb.avgL)}</div></div>
+        <div class="stat"><div class="l">Средний результат</div><div class="v num ${cls(sb.avg)}">${rub(sb.avg)}</div></div></div></div>
+      <div class="card"><h3>Как закрывались сделки</h3>${bars(ex.map(x => [x.k, x.s.net, x.s.n]))}</div></div>
+      <div class="card" style="margin-top:12px"><h3>Качество входа и выхода</h3><div class="sub">MAE — худшее движение против позиции, MFE — лучший потенциал в сделке, ₽</div>${maeMfe(real)}</div>`;
+  } else {
+    const hb = group(real, hourBucket).sort((a,b) => HOUR_ORDER.indexOf(a.k) - HOUR_ORDER.indexOf(b.k));
+    const wd = group(real, t => WD[(msk(t.entry_t).getUTCDay()+6)%7]).sort((a,b) => WD.indexOf(a.k) - WD.indexOf(b.k));
+    const HOLD = ["до 1 часа","1–24 часа","1–3 дня","больше 3 дней"];
+    const hold = group(real, holdOf).sort((a,b) => HOLD.indexOf(a.k) - HOLD.indexOf(b.k));
+    body = `<div class="card" style="margin-top:12px"><h3>Когда торгую лучше</h3><div class="sub">По времени входа, МСК</div>${bars(hb.map(x => [x.k, x.s.net, x.s.n]))}</div>
+      <div class="two" style="margin-top:12px"><div class="card"><h3>По дням недели</h3>${bars(wd.map(x => [x.k, x.s.net, x.s.n]))}</div>
+      <div class="card"><h3>Сколько держу позицию</h3>${bars(hold.map(x => [x.k, x.s.net, x.s.n]))}</div></div>`;
+  }
+  return head + body + `<button class="btn" data-go="journal">Показать ${ts.length} ${pl(ts.length)} →</button>`;
+}
+function maeMfe(ts) {
+  const pts = ts.filter(t => t.mfe || t.mae);
+  if (!pts.length) return '<div class="empty">Нет данных о движении цены внутри сделок</div>';
+  const W = CW(), H = 240, P = {l:56, r:12, t:12, b:30};
+  const mx = Math.max(1, ...pts.map(t => -t.mae)), my = Math.max(1, ...pts.map(t => t.mfe));
+  const x = v => P.l + (W-P.l-P.r)*v/mx, y = v => H-P.b - (H-P.t-P.b)*v/my;
+  let g = `<line x1="${P.l}" x2="${W-P.r}" y1="${H-P.b}" y2="${H-P.b}" stroke="var(--line)"/><line x1="${P.l}" x2="${P.l}" y1="${P.t}" y2="${H-P.b}" stroke="var(--line)"/>
+    <text x="${W-P.r}" y="${H-8}" font-size="11" fill="var(--muted)" text-anchor="end">MAE, ₽ (против позиции) →</text>
+    <text x="${P.l-6}" y="${P.t+8}" font-size="11" fill="var(--muted)" text-anchor="end">${nf0.format(my)}</text>
+    <text x="${P.l-6}" y="${H-P.b}" font-size="11" fill="var(--muted)" text-anchor="end">0</text>
+    <text x="14" y="${(H)/2}" font-size="11" fill="var(--muted)" transform="rotate(-90 14 ${H/2})" text-anchor="middle">MFE, ₽ ↑</text>`;
+  for (const t of pts) g += `<circle cx="${x(-t.mae)}" cy="${y(t.mfe)}" r="${5+Math.min(6,Math.abs(t.net)/Math.max(1,...pts.map(q=>Math.abs(q.net)))*6)}" fill="${t.net>=0?"var(--green)":"var(--red)"}" opacity=".75"><title>${t.ticker} ${dshort(t.entry_t)}: ${rub(t.net)} · MAE ${rub(t.mae)} · MFE ${rub(t.mfe)}</title></circle>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="MAE и MFE сделок">${g}</svg>
+    <div class="legend"><span><i class="dot" style="background:var(--green)"></i>прибыльная</span><span><i class="dot" style="background:var(--red)"></i>убыточная</span><span>размер — величина результата</span></div>
+    <div class="sub" style="margin:8px 0 0">Справа внизу — сделки, которые сразу пошли против позиции; слева вверху — хорошие входы.</div>`;
+}
+function vProfile() {
+  const ts = tradesIn(), real = ts.filter(t => t.exit_kind !== "abort"), ins = insights(ts, daysIn());
+  const withStop = real.filter(t => t.stop_at_entry).length;
+  const cap = D.capital * D.risk_per_trade * 1.5;
+  const losers = real.filter(t => t.net < 0), inRisk = losers.filter(t => -t.net <= Math.max(cap, 1)).length;
+  const strong = ins.filter(i => i.type === "good").concat(ins.filter(i => i.type === "bad"));
+  const obs = ins.filter(i => i.type !== "good" && i.type !== "bad");
+  const recent = [...ts].reverse().slice(0, 4);
+  const acts = actions(ts);
+  return `<div class="grid cols">
+    <div class="card"><h3>Трендовый · часовые бары</h3><div class="sub">Профиль по истории, а не оценка будущей доходности</div>
+      ${strong.map(note).join("") || '<div class="empty">Пока нет выраженных сильных и слабых сторон</div>'}</div>
+    <div class="card"><h3>Дисциплина и исполнение</h3><div class="stats" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stat"><div class="l">Стоп задан при входе</div><div class="v num">${real.length?Math.round(withStop/real.length*100)+"%":"—"}</div></div>
+      <div class="stat"><div class="l">Убыток в лимите риска</div><div class="v num">${losers.length?Math.round(inRisk/losers.length*100)+"%":"—"}</div></div>
+      <div class="stat"><div class="l">Отменённых входов</div><div class="v num">${ts.length-real.length}</div></div></div>
+      <div class="sub" style="margin:10px 0 0">Лимит риска — ${Math.round(D.risk_per_trade*100)}% от ${rub(D.capital,false)} с допуском ×1,5 на проскальзывание.</div></div>
+  </div>
+  <div class="card" style="margin-top:12px"><h3>Наблюдения <span class="tag" style="vertical-align:middle">авто</span></h3>${obs.map(note).join("") || '<div class="empty">Нет наблюдений</div>'}</div>
+  <div class="two" style="margin-top:12px">
+    <div class="card"><h3>Журнал: последние сделки</h3><div class="list">${recent.map(tradeRow).join("") || '<div class="empty">Сделок нет</div>'}</div>
+      <a class="link" href="#" data-go="journal">Все сделки ›</a></div>
+    <div class="card"><h3>От анализа к действию</h3>${acts.map(note).join("") || '<div class="empty">Срочных действий нет</div>'}</div>
+  </div>`;
+}
+function tradeRow(t) {
+  const k = KIND[t.exit_kind] || ["",""];
+  return `<div class="it" data-trade="${D.trades.indexOf(t)}"><div><b>${esc(t.ticker)}</b> <span class="muted">· ${sideRu(t.side)} ${t.qty}</span>
+    <div class="muted" style="font-size:12.5px">${dtime(t.entry_t)} → ${dtime(t.exit_t)} <span class="tag ${k[1]}">${k[0]}</span>${t.after_stop?' <span class="tag ab">после стопа</span>':""}</div></div>
+    <div class="num ${cls(t.net)}" style="font-weight:600;white-space:nowrap">${rub(t.net)} ›</div></div>`;
+}
+function vJournal() {
+  const ts = [...tradesIn()].reverse(), s = stats(ts);
+  return `<div class="card" style="margin-top:12px"><h3>Сделки за период</h3><div class="sub">${ts.length} ${pl(ts.length)} · ${rub(s.net)} после комиссий ${rub(-s.fees)}</div>
+    <div class="list">${ts.map(tradeRow).join("") || '<div class="empty">За период закрытых сделок нет</div>'}</div></div>
+    <div class="card" style="margin-top:12px"><h3>Пополнения и выводы</h3>${D.flows.map(f => `<div class="row"><span class="muted">${dtime(f.t)}</span><span class="num">${rub(f.amount)}</span></div>`).join("") || '<div class="empty">Нет</div>'}</div>`;
+}
+function showTrade(i) {
+  const t = D.trades[i], k = KIND[t.exit_kind] || ["",""];
+  const eff = t.mfe > 0 && t.gross > 0 ? Math.round(t.gross/t.mfe*100) + "%" : "—";
+  $("#panel").innerHTML = `<button class="x" data-close aria-label="Закрыть">×</button><h3 style="margin:0 0 4px">${esc(t.ticker)} · ${sideRu(t.side)} ${t.qty}</h3>
+    <div class="muted" style="font-size:13px;margin-bottom:10px">${dtime(t.entry_t)} → ${dtime(t.exit_t)} · <span class="tag ${k[1]}">${k[0]}</span> · ${setupOf(t)}</div>
+    ${tradeChart(t)}
+    <div class="legend"><span><i class="dot" style="background:var(--green)"></i>Цена</span><span><i class="dot" style="background:var(--red);opacity:.4"></i>MAE</span><span><i class="dot" style="background:var(--green);opacity:.4"></i>MFE</span></div>
+    <div class="stats" style="margin-top:12px">
+      <div class="stat"><div class="l">Вход</div><div class="v num">${t.entry}</div></div><div class="stat"><div class="l">Выход</div><div class="v num">${t.exit}</div></div>
+      <div class="stat"><div class="l">До комиссий</div><div class="v num ${cls(t.gross)}">${rub(t.gross)}</div></div><div class="stat"><div class="l">Комиссии</div><div class="v num neg">${rub(-t.fees)}</div></div>
+      <div class="stat"><div class="l">Итог</div><div class="v num ${cls(t.net)}">${rub(t.net)}</div></div><div class="stat"><div class="l">MAE</div><div class="v num neg">${rub(t.mae)}</div></div>
+      <div class="stat"><div class="l">MFE</div><div class="v num pos">${rub(t.mfe)}</div></div><div class="stat"><div class="l">Забрано от MFE</div><div class="v num">${eff}</div></div></div>
+    ${t.stop_at_entry ? note({type:"good", title:"Стоп выставлен при входе", text:"Стоп‑заявка появилась на бирже в течение 3 минут после входа."}) : t.exit_kind === "abort" ? note({type:"warn", title:"Вход отменён", text:"Стоп не принят биржей, позиция закрыта сразу. Потеряна комиссия."}) : note({type:"warn", title:"Стоп при входе не найден", text:"В истории стоп‑заявок нет стопа в первые 3 минуты после входа."})}`;
+  $("#sheet").classList.add("on");
+}
+function showMethod() {
+  $("#panel").innerHTML = `<button class="x" data-close aria-label="Закрыть">×</button><h3 style="margin-top:0">Методика</h3>
+    <p><b>TWR</b> — доходность по времени: цепочка доходностей между пополнениями и выводами. Не зависит от того, сколько денег и когда вы вносили, поэтому подходит для оценки стратегии.</p>
+    <p><b>MWR</b> — доходность на ваши деньги (внутренняя норма доходности): учитывает, когда и сколько было на счёте.</p>
+    <p><b>Сравнение</b> — с фондом денежного рынка ${esc(D.benchmark)}: это доходность «без риска», которую дают свободные деньги. Индекс акций для фьючерсной трендовой стратегии на юане, золоте и Газпроме не показателен.</p>
+    <p><b>Стоимость портфеля</b> — рубли плюс ценные бумаги по рыночной цене. Результат по фьючерсам попадает в неё после клиринга (вариационная маржа).</p>
+    <p><b>Сделка</b> — позиция по контракту от открытия до полного закрытия. <b>MAE / MFE</b> — худшее и лучшее движение цены внутри сделки по часовым (15‑минутным для коротких) свечам, в рублях на весь объём.</p>
+    <p><b>Профит‑фактор</b> — сумма прибыли / сумма убытков после комиссий. <b>Sharpe</b> — средняя дневная доходность / её разброс × √252.</p>
+    <p class="muted">Источник: операции счёта в Т‑Инвестициях с ${dtime(D.start)}. Данные обновляются автоматически, последнее обновление — ${dtime(D.generated)} МСК.</p>`;
+  $("#sheet").classList.add("on");
+}
+
+// ---------- shell
+function render() {
+  try { localStorage.setItem("ta-state", JSON.stringify({view:state.view, period:state.period, slice:state.slice})); } catch(e){}
+  const v = VIEWS.find(v => v[0] === state.view) || VIEWS[0];
+  $("#title").textContent = v[2];
+  const nav = VIEWS.map(([k,l]) => `<button class="${state.view===k?"on":""}" data-go="${k}" aria-label="${l}">${ICONS[k]}<span>${l}</span></button>`).join("");
+  $("#bottom").innerHTML = nav;
+  $("#side").innerHTML = `<div class="brand"><span class="logo">%</span>Помощник трейдера</div>` + nav;
+  $("#period").innerHTML = [["week","Неделя"],["month","Месяц"],["all","Всё время"]].map(([k,l]) => `<button class="${state.period===k?"on":""}" data-period="${k}">${l}</button>`).join("");
+  if (!D) return;
+  $("#view").innerHTML = ({home:vHome, slices:vSlices, profile:vProfile, journal:vJournal}[state.view] || vHome)();
+  $("#foot").innerHTML = `Данные Т‑Инвестиций · обновлено ${dtime(D.generated)} МСК · не является инвестиционной рекомендацией`;
+}
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-go],[data-period],[data-slice],[data-trade],[data-sheet],[data-close],.sheet");
+  if (!el) return;
+  if (el.dataset.go) { e.preventDefault(); state.view = el.dataset.go; render(); window.scrollTo(0,0); }
+  else if (el.dataset.period) { state.period = el.dataset.period; render(); }
+  else if (el.dataset.slice) { state.slice = el.dataset.slice; render(); }
+  else if (el.dataset.trade) showTrade(+el.dataset.trade);
+  else if (el.dataset.sheet) { e.preventDefault(); showMethod(); }
+  else if (el.hasAttribute("data-close") || e.target === el) $("#sheet").classList.remove("on");
+});
+let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(render, 150); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("#sheet").classList.remove("on"); });
+render();
+fetch("data.json", {cache:"no-store"}).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d => { D = d; render(); })
+  .catch(err => { $("#view").innerHTML = `<div class="card" style="margin-top:12px"><h3>Нет данных</h3><div class="empty">Не удалось загрузить data.json (${esc(err.message)}).</div></div>`; });
+</script>
+</body>
+</html>
