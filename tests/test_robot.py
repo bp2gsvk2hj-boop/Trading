@@ -606,6 +606,18 @@ class CollateralTest(unittest.TestCase):
             e._rebalance(NOW + timedelta(minutes=30))
             self.assertLess(e.broker.cash(), 25_000)                 # back to ~2% cash
 
+    def test_fund_trades_only_at_the_end_of_the_day(self):
+        from dataclasses import replace
+        with tempfile.TemporaryDirectory() as tmp:
+            e = self._engine(tmp, [bar(NOW - H, 100, 100, 100, 100)])
+            e.cfg.collateral = replace(e.cfg.collateral, rebalance_from="18:45", rebalance_to="23:40")
+            day = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)          # 15:00 MSK
+            e.run_once(day)
+            self.assertEqual(e.broker.units("fund"), 0)                      # 1M cash waits
+            e.run_once(day + timedelta(hours=3, minutes=47))                  # 18:47 MSK
+            self.assertEqual(e.broker.units("fund"), 9_800)
+            self.assertFalse(e._rebalance_due(datetime(2026, 10, 14, 20, 45, tzinfo=timezone.utc)))   # 23:45 MSK
+
     def test_capital_cap_keeps_the_rest_in_rubles(self):
         from dataclasses import replace
         with tempfile.TemporaryDirectory() as tmp:
