@@ -18,14 +18,19 @@ started = "2026-10-16T13:32:44.5Z"
 # Idle cash goes into LQDT (money-market fund, ~key rate). T-Bank blocks futures GO in rubles:
 # GO not covered by cash is a loan with a daily carry fee (40-700 RUB/day on «Трейдер», every
 # calendar day, ~26%+ a year), so the robot keeps cash = blocked GO + ~2% of equity for
-# variation margin and fees. It sells LQDT when cash < GO (right after an entry, the same pass)
-# and buys when cash exceeds GO + 4%. Sizing uses cash + LQDT value as capital.
+# variation margin and fees. It sells LQDT when cash < GO and buys when cash exceeds GO + 4%,
+# once a day at the end of the session (see rebalance_from). Sizing uses cash + LQDT as capital.
 enabled = true
 ticker = "LQDT"
 class_code = "SPBRU"        # LQDT is API-tradeable only on this board
 cash_target = 0.02
 cash_max = 0.04
 haircut = 0.40
+# Fund trades only from 5 min before the end of the main session (18:50) until 23:40 MSK: within
+# the day cash may stay below GO for free (no carry fee if covered by the day's end), so opposite
+# trades net out. Fallback passes at 19:35 and 22:35 MSK cover a late or skipped 18:47 pass.
+rebalance_from = "18:45"
+rebalance_to = "23:40"
 
 [risk]
 capital_rub = 100000        # since 27.10.2026 (was 1M). Sizing uses min(this, cash + LQDT); money above

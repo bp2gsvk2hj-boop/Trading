@@ -31,6 +31,11 @@ class CollateralCfg:
     cash_max: float = 0.04         # buy the fund when cash exceeds GO + this share (sell when cash < GO)
     haircut: float = 0.40          # broker risk rate: the fund counts as (1 - haircut) of its value
     fee_rate: float = 0.0005       # fund trade fee, paper/backtest only
+    # Rebalance only in this window (MSK). During the day cash may fall below GO for free: T-Bank
+    # charges for a margin loan only if it is not repaid by the end of the trading day. So
+    # opposite fund trades within one day net out and save the 0.05% fee. "" = any time.
+    rebalance_from: str = ""
+    rebalance_to: str = "23:40"
 
 
 @dataclass

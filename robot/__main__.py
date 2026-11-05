@@ -76,6 +76,11 @@ def cmd_flatten(a, cfg):
         print(line)
 
 
+def cmd_collateral(a, cfg):
+    for line in Engine(cfg, dry_run=a.dry_run).collateral():
+        print(line)
+
+
 def cmd_resize(a, cfg):
     for line in Engine(cfg, dry_run=a.dry_run).resize():
         print(line)
@@ -136,6 +141,8 @@ def main(argv=None):
     sub.add_parser("status", help="positions, stops, money").set_defaults(fn=cmd_status)
     f = sub.add_parser("flatten", help="cancel robot stops and close robot positions")
     f.add_argument("--dry-run", action="store_true"); f.set_defaults(fn=cmd_flatten)
+    c = sub.add_parser("collateral", help="rebalance the collateral fund (LQDT) now")
+    c.add_argument("--dry-run", action="store_true"); c.set_defaults(fn=cmd_collateral)
     r = sub.add_parser("resize", help="cut positions to the risk limits of the current capital_rub")
     r.add_argument("--dry-run", action="store_true"); r.set_defaults(fn=cmd_resize)
     h = sub.add_parser("halt", help="stop opening new trades"); h.add_argument("reason", nargs="?", default="manual halt")

@@ -5,12 +5,16 @@ on:
     # Every 15 min on weekdays, 10:02-18:47 Moscow time (UTC+3), shortly after each 15m/1h bar
     # closes. GitHub may start runs late.
     - cron: "2-59/15 7-15 * * 1-5"
+    # LQDT rebalance only (it trades until 23:50 MSK): fallback if the 18:47 pass is late or
+    # skipped, so the day's margin loan is repaid before the day ends (no carry fee).
+    - cron: "35 16 * * 1-5"    # 19:35 MSK
+    - cron: "35 19 * * 1-5"    # 22:35 MSK
   workflow_dispatch:
     inputs:
       command:
         description: "Robot command"
         type: choice
-        options: [run, status, flatten, resize]
+        options: [run, status, flatten, resize, collateral]
         default: run
 
 concurrency:
@@ -49,11 +53,18 @@ jobs:
           python3 -m robot ${{ inputs.command }} 2>&1 | tee run.log
       - name: Trading pass
         id: pass
-        if: ${{ github.event_name == 'schedule' || inputs.command == 'run' }}
+        if: ${{ github.event.schedule == '2-59/15 7-15 * * 1-5' || inputs.command == 'run' }}
         shell: bash
         run: |
           set -o pipefail
           python3 -m robot run 2>&1 | tee run.log
+      - name: Collateral rebalance (evening)
+        id: collateral
+        if: ${{ github.event_name == 'schedule' && github.event.schedule != '2-59/15 7-15 * * 1-5' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 -m robot collateral 2>&1 | tee run.log
       - name: Status
         if: ${{ always() }}
         shell: bash
@@ -65,13 +76,15 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          FAILED: ${{ steps.pass.outcome == 'failure' || steps.command.outcome == 'failure' }}
+          FAILED: ${{ steps.pass.outcome == 'failure' || steps.command.outcome == 'failure' || steps.collateral.outcome == 'failure' }}
+          MAIN_PASS: ${{ github.event.schedule == '2-59/15 7-15 * * 1-5' }}
         run: |
           args=(--run run.log --status status.json --trades
                 --url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
           [ "$FAILED" = "true" ] && args+=(--exit-code 1)
-          # Last scheduled pass of the day (18:47 MSK, may start late) and manual runs: always report.
-          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(date -u +%H%M)" -ge 1545 ]; then
+          # Last trading pass of the day (18:47 MSK, may start late) and manual runs: daily summary.
+          # The evening LQDT passes only report what they did (and problems).
+          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$MAIN_PASS" = "true" ] && [ "$(date -u +%H%M)" -ge 1545 ]; }; then
             args+=(--summary)
           fi
           python3 -m robot.telegram "${args[@]}"

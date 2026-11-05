@@ -171,7 +171,7 @@ class Engine:
                 margin += self._slot(slot, inst, now, risk, margin)
             except Exception as e:  # one bad slot must not stop the others
                 self.log("error", ticker=inst.ticker, error=f"{type(e).__name__}: {e}")
-        if self.cfg.collateral.enabled:
+        if self.cfg.collateral.enabled and self._rebalance_due(now):
             try:
                 self._rebalance(now)
             except Exception as e:
@@ -194,6 +194,21 @@ class Engine:
         uid = self._fund_uid()
         px = q2f(self.c.call("MarketDataService/GetLastPrices", {"instrumentId": [uid]})["lastPrices"][0]["price"])
         return self.broker.cash(), self.broker.units(uid), px
+
+    def _rebalance_due(self, now: datetime) -> bool:
+        cc = self.cfg.collateral
+        if not cc.rebalance_from:
+            return True
+        t = now.astimezone(MSK).strftime("%H:%M")
+        return cc.rebalance_from <= t <= cc.rebalance_to
+
+    def collateral(self, now: datetime | None = None) -> list[str]:
+        """Rebalance the collateral fund only (evening fallback passes and manual runs)."""
+        now = now or datetime.now(timezone.utc)
+        if self.cfg.collateral.enabled:
+            self._rebalance(now)
+        self.save()
+        return self.notes
 
     def _go_in_use(self) -> float:
         """RUB blocked as futures GO. The broker's figure is what the carry fee is charged on
