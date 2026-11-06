@@ -572,18 +572,20 @@ class CollateralTest(unittest.TestCase):
             bars = [bar(NOW - H, 100, 100, 100, 100)]            # fund price 100 in this fake
             e = self._engine(tmp, bars)
             e._rebalance(NOW)
-            # no futures open: all 1M goes into the fund, the 0.05% fee leaves cash at -500
-            self.assertEqual(e.broker.units("fund"), 10_000)
-            self.assertAlmostEqual(e.broker.cash(), -500)
+            # no futures open: all 1M goes into the fund, but the buy must fit the cash with its fee
+            # (T-Bank rejects buying the fund on margin): 1M / (100 * 1.001) = 9 990 units
+            self.assertEqual(e.broker.units("fund"), 9_990)
+            self.assertAlmostEqual(e.broker.cash(), 1_000_000 - 999_000 - 499.5)
+            self.assertGreaterEqual(e.broker.cash(), 0)
             self.assertTrue(any("[collateral] ticker=LQDT, action=buy" in n for n in e.notes), e.notes)
 
             before = e.broker.units("fund")
-            e._rebalance(NOW + timedelta(minutes=15))                  # -500 is within 1 000: nothing
+            e._rebalance(NOW + timedelta(minutes=15))                  # ~500 idle is under 1 000: nothing
             self.assertEqual(e.broker.units("fund"), before)
 
             e.broker.s["money"] = -5_000.0                            # e.g. a commission + varmargin
             e._rebalance(NOW + timedelta(minutes=30))
-            self.assertEqual(e.broker.units("fund"), 10_000 - 50)      # sell ceil(5 000 / 100)
+            self.assertEqual(e.broker.units("fund"), 9_990 - 50)       # sell ceil(5 000 / 100)
             self.assertGreaterEqual(e.broker.cash(), -10)
 
             e.broker.s["money"] = 800.0                               # small idle cash: not worth a trade
@@ -620,7 +622,7 @@ class CollateralTest(unittest.TestCase):
             e.run_once(day)
             self.assertEqual(e.broker.units("fund"), 0)                      # 1M cash waits
             e.run_once(day + timedelta(hours=3, minutes=47))                  # 18:47 MSK
-            self.assertEqual(e.broker.units("fund"), 10_000)
+            self.assertEqual(e.broker.units("fund"), 9_990)
             self.assertFalse(e._rebalance_due(datetime(2026, 10, 14, 20, 45, tzinfo=timezone.utc)))   # 23:45 MSK
 
     def test_capital_from_account_has_no_cap(self):

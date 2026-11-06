@@ -259,7 +259,12 @@ class Engine:
         else:
             return
         side = 1 if amount > 0 else -1
-        qty = math.floor(amount / px) if side > 0 else min(int(units), math.ceil(-amount / px))
+        # A buy must fit into the cash on hand with its fee: T-Bank rejects buying the fund on margin
+        # (30049, 06.11). Leave the fee plus 0.05% for the price moving up to the ask.
+        if side > 0:
+            amount = min(amount, cash - go)
+        qty = (math.floor(amount / (px * (1 + cc.fee_rate + 0.0005))) if side > 0
+               else min(int(units), math.ceil(-amount / px)))
         if qty <= 0:
             return
         s = self.c.call("MarketDataService/GetTradingStatus", {"instrumentId": uid})
