@@ -623,6 +623,16 @@ class CollateralTest(unittest.TestCase):
             self.assertEqual(e.broker.units("fund"), 10_000)
             self.assertFalse(e._rebalance_due(datetime(2026, 10, 14, 20, 45, tzinfo=timezone.utc)))   # 23:45 MSK
 
+    def test_capital_from_account_has_no_cap(self):
+        from dataclasses import replace
+        with tempfile.TemporaryDirectory() as tmp:
+            e = self._engine(tmp, [bar(NOW - H, 100, 100, 100, 100)])
+            e.cfg.risk = replace(e.cfg.risk, capital_rub=100_000, capital_from_account=True)
+            e.cfg.mode = "live"                       # the cap is lifted only off paper
+            self.assertEqual(e._capital_cap(), float("inf"))
+            e.cfg.mode = "paper"
+            self.assertEqual(e._capital_cap(), 100_000)
+
     def test_capital_cap_keeps_the_rest_in_rubles(self):
         from dataclasses import replace
         with tempfile.TemporaryDirectory() as tmp:

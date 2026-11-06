@@ -34,8 +34,9 @@ rebalance_to = "23:40"
 flat_min_trade = 1000        # no futures open: everything into LQDT, if more than this is idle
 
 [risk]
-capital_rub = 100000        # since 27.10.2026 (was 1M). Sizing uses min(this, cash + LQDT); money above
-                            # it stays in rubles, outside the robot (not put into LQDT)
+capital_from_account = true # since 06.11.2026: capital = the whole account (cash + LQDT), profits reinvested;
+                            # a deposit is traded too. false = cap at capital_rub (money above stays in rubles)
+capital_rub = 100000        # cap when capital_from_account = false; paper/backtest capital
 risk_per_trade = 0.01       # target loss at the stop, share of capital
 max_risk_per_trade = 0.03   # skip the trade if even 1 contract risks more
 max_margin_share = 0.6      # GO of all positions <= 60% of capital. LQDT counts as 60% of its value,

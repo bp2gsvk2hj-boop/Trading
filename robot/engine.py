@@ -165,7 +165,7 @@ class Engine:
             capital = cash + units * px
         else:
             capital = self.broker.free_money() + margin
-        risk = replace(self.cfg.risk, capital_rub=min(self.cfg.risk.capital_rub, capital))
+        risk = replace(self.cfg.risk, capital_rub=min(self._capital_cap(), capital))
         for slot, inst in zip(slots, insts):
             try:
                 margin += self._slot(slot, inst, now, risk, margin)
@@ -194,6 +194,12 @@ class Engine:
         uid = self._fund_uid()
         px = q2f(self.c.call("MarketDataService/GetLastPrices", {"instrumentId": [uid]})["lastPrices"][0]["price"])
         return self.broker.cash(), self.broker.units(uid), px
+
+    def _capital_cap(self) -> float:
+        """Most capital the robot sizes and invests from: [risk].capital_rub, or no cap at all with
+        capital_from_account (the whole account: profits are reinvested, deposits used too)."""
+        r = self.cfg.risk
+        return float("inf") if r.capital_from_account and self.cfg.mode != "paper" else r.capital_rub
 
     def _rebalance_due(self, now: datetime) -> bool:
         cc = self.cfg.collateral
@@ -234,8 +240,9 @@ class Engine:
             return
         fund = units * px
         go = self._go_in_use()
-        # The robot manages at most [risk].capital_rub; money above it stays in rubles (e.g. to withdraw).
-        equity = min(cash + fund, self.cfg.risk.capital_rub)
+        # The robot manages at most its capital cap; money above it stays in rubles (e.g. to withdraw).
+        cap = self._capital_cap()
+        equity = min(cash + fund, cap)
         if go > 0:
             target = equity * (1 - cc.cash_target) - go   # fund value that leaves GO + cash_target in cash
             buy_below, sell_cash, tol = equity * (1 - cc.cash_max) - go, go, 0.0
@@ -244,8 +251,8 @@ class Engine:
             # entry fee may take cash a little below zero; up to 5 000 RUB that costs nothing.
             target = equity
             buy_below, sell_cash, tol = equity - cc.flat_min_trade, -cc.flat_min_trade, cc.flat_min_trade
-        # sell: cash short of GO, or more in the fund than the robot manages (capital_rub)
-        if cash < sell_cash or fund > self.cfg.risk.capital_rub - go + tol:
+        # sell: cash short of GO, or more in the fund than the robot manages (its capital cap)
+        if cash < sell_cash or fund > cap - go + tol:
             amount = min(target - fund, cash - go)       # sell (< 0)
         elif fund < buy_below:
             amount = target - fund                       # buy (> 0)
@@ -485,7 +492,7 @@ class Engine:
         else:
             capital = self.broker.free_money() + sum(
                 abs(self.broker.holding(i).qty) * i.go for i in (self.inst(s.ticker) for s in self.cfg.slots))
-        risk = replace(self.cfg.risk, capital_rub=min(self.cfg.risk.capital_rub, capital))
+        risk = replace(self.cfg.risk, capital_rub=min(self._capital_cap(), capital))
         margin = 0.0
         for slot in [s for s in self.cfg.slots if s.enabled]:
             inst = self.inst(slot.ticker)
