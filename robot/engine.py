@@ -223,7 +223,8 @@ class Engine:
         """Keep the blocked GO plus ~cash_target of equity in cash and the rest in the fund.
         T-Bank blocks GO in rubles: GO not covered by cash is a loan from the broker with a daily
         carry fee (free only if repaid the same day), so the fund is sold right after an entry.
-        Sell when cash < GO, buy when cash > GO + cash_max of equity."""
+        Sell when cash < GO, buy when cash > GO + cash_max of equity. With no futures open, keep
+        no cash: buy when more than flat_min_trade is idle."""
         cc = self.cfg.collateral
         uid = self._fund_uid()
         if isinstance(self.broker, PaperBroker):
@@ -235,10 +236,18 @@ class Engine:
         go = self._go_in_use()
         # The robot manages at most [risk].capital_rub; money above it stays in rubles (e.g. to withdraw).
         equity = min(cash + fund, self.cfg.risk.capital_rub)
-        target = equity * (1 - cc.cash_target) - go       # fund value that leaves GO + cash_target in cash
-        if cash < go or fund > equity - go:
+        if go > 0:
+            target = equity * (1 - cc.cash_target) - go   # fund value that leaves GO + cash_target in cash
+            buy_below, sell_cash, tol = equity * (1 - cc.cash_max) - go, go, 0.0
+        else:
+            # No futures: no variation margin to cover, so everything goes into the fund. Tomorrow's
+            # entry fee may take cash a little below zero; up to 5 000 RUB that costs nothing.
+            target = equity
+            buy_below, sell_cash, tol = equity - cc.flat_min_trade, -cc.flat_min_trade, cc.flat_min_trade
+        # sell: cash short of GO, or more in the fund than the robot manages (capital_rub)
+        if cash < sell_cash or fund > self.cfg.risk.capital_rub - go + tol:
             amount = min(target - fund, cash - go)       # sell (< 0)
-        elif fund < equity * (1 - cc.cash_max) - go:
+        elif fund < buy_below:
             amount = target - fund                       # buy (> 0)
         else:
             return
