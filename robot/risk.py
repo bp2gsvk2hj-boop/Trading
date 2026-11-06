@@ -12,6 +12,7 @@ from .strategies import MSK, parse_hhmm
 @dataclass
 class RiskConfig:
     capital_rub: float = 5000.0
+    capital_from_account: bool = False  # live: capital = the whole account (cash + fund), capital_rub only for paper/backtest
     risk_per_trade: float = 0.01        # target risk per trade, share of capital
     max_risk_per_trade: float = 0.03    # hard cap: skip the trade if even 1 contract risks more
     max_margin_share: float = 0.6       # GO of all robot positions <= this share of capital
