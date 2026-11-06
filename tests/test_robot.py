@@ -572,18 +572,23 @@ class CollateralTest(unittest.TestCase):
             bars = [bar(NOW - H, 100, 100, 100, 100)]            # fund price 100 in this fake
             e = self._engine(tmp, bars)
             e._rebalance(NOW)
-            self.assertEqual(e.broker.units("fund"), 9_800)          # 98% of 1M at 100
-            self.assertAlmostEqual(e.broker.cash(), 1_000_000 - 980_000 - 490)   # 0.05% fee
+            # no futures open: all 1M goes into the fund, the 0.05% fee leaves cash at -500
+            self.assertEqual(e.broker.units("fund"), 10_000)
+            self.assertAlmostEqual(e.broker.cash(), -500)
             self.assertTrue(any("[collateral] ticker=LQDT, action=buy" in n for n in e.notes), e.notes)
 
-            e.broker.s["money"] = -5_000.0                            # variation margin loss
-            e._rebalance(NOW + timedelta(minutes=15))
-            # equity 975 000 -> keep 2% = 19 500 in cash: sell ceil(24 500 / 100) = 245 units
-            self.assertEqual(e.broker.units("fund"), 9_800 - 245)
-            self.assertGreater(e.broker.cash(), 19_000)
-
             before = e.broker.units("fund")
-            e._rebalance(NOW + timedelta(minutes=30))                  # cash inside the band: nothing
+            e._rebalance(NOW + timedelta(minutes=15))                  # -500 is within 1 000: nothing
+            self.assertEqual(e.broker.units("fund"), before)
+
+            e.broker.s["money"] = -5_000.0                            # e.g. a commission + varmargin
+            e._rebalance(NOW + timedelta(minutes=30))
+            self.assertEqual(e.broker.units("fund"), 10_000 - 50)      # sell ceil(5 000 / 100)
+            self.assertGreaterEqual(e.broker.cash(), -10)
+
+            e.broker.s["money"] = 800.0                               # small idle cash: not worth a trade
+            before = e.broker.units("fund")
+            e._rebalance(NOW + timedelta(minutes=45))
             self.assertEqual(e.broker.units("fund"), before)
 
     def test_cash_covers_blocked_go(self):
@@ -615,7 +620,7 @@ class CollateralTest(unittest.TestCase):
             e.run_once(day)
             self.assertEqual(e.broker.units("fund"), 0)                      # 1M cash waits
             e.run_once(day + timedelta(hours=3, minutes=47))                  # 18:47 MSK
-            self.assertEqual(e.broker.units("fund"), 9_800)
+            self.assertEqual(e.broker.units("fund"), 10_000)
             self.assertFalse(e._rebalance_due(datetime(2026, 10, 14, 20, 45, tzinfo=timezone.utc)))   # 23:45 MSK
 
     def test_capital_cap_keeps_the_rest_in_rubles(self):
@@ -625,8 +630,8 @@ class CollateralTest(unittest.TestCase):
             e.cfg.risk = replace(e.cfg.risk, capital_rub=100_000)
             e.broker.s["sec"] = {"fund": 9_800.0}                    # 980 000 in the fund, 1M cash
             e._rebalance(NOW)
-            # manage 100 000: fund = 98 000 (980 units), the rest stays in cash
-            self.assertEqual(e.broker.units("fund"), 980)
+            # manage 100 000, no futures: fund = 100 000 (1 000 units), the rest stays in cash
+            self.assertEqual(e.broker.units("fund"), 1_000)
             self.assertGreater(e.broker.cash(), 1_800_000)
             before = e.broker.units("fund")
             e._rebalance(NOW + timedelta(minutes=15))

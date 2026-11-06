@@ -31,6 +31,7 @@ haircut = 0.40
 # trades net out. Fallback passes at 19:35 and 22:35 MSK cover a late or skipped 18:47 pass.
 rebalance_from = "18:45"
 rebalance_to = "23:40"
+flat_min_trade = 1000        # no futures open: everything into LQDT, if more than this is idle
 
 [risk]
 capital_rub = 100000        # since 27.10.2026 (was 1M). Sizing uses min(this, cash + LQDT); money above
