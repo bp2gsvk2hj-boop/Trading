@@ -49,6 +49,7 @@ class Broker:
     def blocked_go(self) -> float | None: ...          # RUB blocked as futures margin (GO), None if unknown
     def units(self, uid: str) -> float: ...
     def trade_units(self, uid: str, side: int, qty: int, key: str) -> None: ...
+    def max_buy_market(self, uid: str) -> int | None: ...   # lots the broker lets a market order buy
     def stopouts_today(self, insts: list[Instrument], since: datetime) -> int: ...
     def sync(self, inst: Instrument, bars: list[Candle]) -> list[str]:
         """Paper only: simulate stop fills on new bars. Returns event notes."""
@@ -156,6 +157,11 @@ class ApiBroker(Broker):
         pos = self.c.call(self._m("OperationsService/GetPositions", "SandboxService/GetSandboxPositions"),
                           {"accountId": self.acc})
         return sum(float(s.get("balance", 0)) for s in pos.get("securities", []) if s.get("instrumentUid") == uid)
+
+    def max_buy_market(self, uid):
+        r = self.c.call(self._m("OrdersService/GetMaxLots", "SandboxService/GetSandboxMaxLots"),
+                        {"accountId": self.acc, "instrumentId": uid})
+        return int((r.get("buyLimits") or {}).get("buyMaxMarketLots", 0))
 
     def trade_units(self, uid, side, qty, key):
         r = self.c.call(self._m("OrdersService/PostOrder", "SandboxService/PostSandboxOrder"), {
@@ -268,6 +274,9 @@ class PaperBroker(Broker):
 
     def units(self, uid):
         return self.s.get("sec", {}).get(uid, 0.0)
+
+    def max_buy_market(self, uid):
+        return None
 
     def trade_units(self, uid, side, qty, key):
         if key in self.s.setdefault("sec_keys", []):

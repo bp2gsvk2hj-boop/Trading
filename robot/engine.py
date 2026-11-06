@@ -265,6 +265,12 @@ class Engine:
             amount = min(amount, cash - go)
         qty = (math.floor(amount / (px * (1 + cc.fee_rate + 0.0005))) if side > 0
                else min(int(units), math.ceil(-amount / px)))
+        if side > 0 and qty > 0:
+            # For a market order the broker reserves cash at a worse price (06.11: 3 603 lots
+            # allowed for 7 904 RUB at 2.128): never ask for more than it allows.
+            cap = self.broker.max_buy_market(uid)
+            if cap is not None:
+                qty = min(qty, cap)
         if qty <= 0:
             return
         s = self.c.call("MarketDataService/GetTradingStatus", {"instrumentId": uid})

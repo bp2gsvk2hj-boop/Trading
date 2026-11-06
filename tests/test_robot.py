@@ -625,6 +625,13 @@ class CollateralTest(unittest.TestCase):
             self.assertEqual(e.broker.units("fund"), 9_990)
             self.assertFalse(e._rebalance_due(datetime(2026, 10, 14, 20, 45, tzinfo=timezone.utc)))   # 23:45 MSK
 
+    def test_buy_capped_by_broker_market_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            e = self._engine(tmp, [bar(NOW - H, 100, 100, 100, 100)])
+            e.broker.max_buy_market = lambda uid: 9_600                 # broker reserves at a worse price
+            e._rebalance(NOW)
+            self.assertEqual(e.broker.units("fund"), 9_600)
+
     def test_capital_from_account_has_no_cap(self):
         from dataclasses import replace
         with tempfile.TemporaryDirectory() as tmp:
