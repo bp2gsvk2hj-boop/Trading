@@ -382,6 +382,16 @@ class Engine:
             act = strat.decide(i, ind, pos, sst["strategy"])
         tag = (self.cfg.account_id or "paper", inst.uid, last.t.isoformat())
 
+        if (act.kind == "stop" and pos.side and act.stop is not None and pos.stop is not None
+                and (inst.round_price(act.stop) - pos.stop) * pos.side >= inst.step - 1e-9 and market_open()):
+            # The new trailing level comes from the bar close, the stop goes in at the live price.
+            # 10.11: GLDRUBF long, new stop 10951.7 but the price was already ~10915: the exchange
+            # rejects a sell stop above the market. The level is breached, so exit now, as the
+            # backtest does (fill at the next price), instead of waiting for the older, lower stop.
+            px = self._last_price(inst)
+            if px and (px - act.stop) * pos.side <= 0:
+                act = Action("exit", reason=f"trail stop {inst.round_price(act.stop):g} already breached at {px:g}")
+
         if act.kind == "exit" and pos.side:
             if not market_open():
                 self.log("blocked", ticker=inst.ticker, action="exit", why="market closed")
