@@ -284,6 +284,19 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(len(new), 1)
         self.assertGreater(new[0].price, old.price)
 
+    def test_trail_level_already_breached_exits_at_market(self):
+        bars = flat_then_breakout()
+        make_engine(self.tmp.name, bars).run_once(NOW)
+        bars += [bar(NOW, 102, 103.5, 101.9, 103.4), bar(NOW + H, 103.4, 104.6, 103.3, 104.5)]
+        eng = make_engine(self.tmp.name, bars)
+        real = eng.c.call
+        eng.c.call = lambda m, b=None: ({"lastPrices": [{"price": f2q(99.8)}]}      # below the new level 99.9, above the old 99.73
+                                        if m == "MarketDataService/GetLastPrices" else real(m, b))
+        notes = eng.run_once(NOW + 2 * H)
+        self.assertEqual(eng.broker.holding(INST).qty, 0, notes)
+        self.assertTrue(any("[market]" in n and "already breached" in n for n in notes), notes)
+        self.assertEqual(eng.broker.stops(INST), [])
+
     def test_rejected_trail_keeps_the_old_stop(self):
         bars = flat_then_breakout()
         make_engine(self.tmp.name, bars).run_once(NOW)
