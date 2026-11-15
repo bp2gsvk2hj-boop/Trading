@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =====================================================================
 #  СКРИПТ 1 — зарубежный сервер (Aeza).   Запуск:  bash foreign.sh
-#  • если VPN ещё не установлен — ставит его (клиенты me и friend);
+#  • если VPN ещё не установлен — ставит его (одна ссылка me);
 #  • создаёт подключение для российского сервера;
 #  • печатает готовую команду для российского сервера.
 #  Повторный запуск безопасен: ключи и ссылки не меняются.
@@ -14,7 +14,7 @@ RU_URL="https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/220267168518f6
 
 if [ ! -f /usr/local/etc/xray/vpn.env ]; then
   curl -fsSL "$BASE/vpn-setup.sh" -o /root/vpn-setup.sh
-  CLIENTS="${CLIENTS:-me friend}" bash /root/vpn-setup.sh
+  CLIENTS="${CLIENTS:-me}" bash /root/vpn-setup.sh
 else
   echo "VPN на этом сервере уже установлен — ключи и ссылки не трогаю."
 fi
