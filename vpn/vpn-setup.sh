@@ -122,7 +122,7 @@ jq -n \
       xhttpSettings: {path: $path, mode: "auto"},
       security: "reality",
       realitySettings: {
-        show: false, dest: ($sni + ":443"), xver: 0,
+        show: false, target: ($sni + ":443"), xver: 0,
         serverNames: [$sni], privateKey: $priv, shortIds: [$sid]
       }
     },
@@ -141,7 +141,10 @@ jq -n \
   }
 }' > "$CFG.new"
 
-xray run -test -config "$CFG.new" >/dev/null || die "Xray отклонил конфиг: $CFG.new"
+if ! TEST_OUT=$(xray run -test -config "$CFG.new" 2>&1); then
+  echo "$TEST_OUT" | tail -15
+  die "Xray отклонил конфиг: $CFG.new (причина выше)"
+fi
 mv "$CFG.new" "$CFG"
 chmod 644 "$CFG"
 
@@ -171,7 +174,7 @@ link() {
   echo "vless://${id}@${SERVER_IP}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUB}&sid=${SID}&type=xhttp&path=%2F${XPATH#/}&mode=auto#${1}"
 }
 apply() {
-  xray run -test -config "$CFG.new" >/dev/null || { echo "Ошибка в конфиге, изменения не применены"; rm -f "$CFG.new"; exit 1; }
+  xray run -test -config "$CFG.new" >/tmp/xray-test.log 2>&1 || { tail -15 /tmp/xray-test.log; echo "Ошибка в конфиге, изменения не применены"; rm -f "$CFG.new"; exit 1; }
   cp "$CFG" "$CFG.bak"; mv "$CFG.new" "$CFG"; chmod 644 "$CFG"
   systemctl restart xray
 }
