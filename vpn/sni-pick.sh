@@ -10,6 +10,8 @@
 #  4. Проверяет TLS 1.3 + HTTP/2 и печатает лучших кандидатов.
 # =====================================================================
 set -uo pipefail
+# --auto: всё служебное в stderr, в stdout — только лучший домен
+AUTO=0; [ "${1:-}" = "--auto" ] && { AUTO=1; exec 3>&1 1>&2; }
 
 LIST_URL="https://github.com/ancored/ru-mobile-whitelist/releases/latest/download/ru-mobile-whitelist-sni.txt"
 SKIP='(^|\.)(google|gstatic|youtube|yandex|ya|yastatic|yandexcloud|vk|vkontakte|vkvideo|userapi|mail|ok|dzen|gosuslugi|gov|kremlin|government|sber|sberbank|tbank|tinkoff|vtb|ozon|wildberries|wb|avito|mts|megafon|beeline|tele2|t2|rutube|apple|icloud|microsoft|cloudflare|max)\.'
@@ -62,4 +64,8 @@ if [ -n "$same" ]; then echo "★ ЛУЧШИЕ — в той же сети, чт
 if [ -n "$near" ]; then echo "☆ Рядом (та же подсеть /16):"; awk '{printf "    %-40s %s\n", $3, $2}' <<<"$near"; echo; fi
 if [ -n "$other" ]; then echo "• Подходят, но из других сетей:"; awk '{printf "    %-40s %s\n", $3, $2}' <<<"$other"; echo; fi
 [ -s "$TMP/ok.txt" ] || { echo "Подходящих сайтов не нашлось."; exit 1; }
-echo "Выберите домен из верхней группы и подставьте в установку: SNI=домен"
+if [ "$AUTO" = 1 ]; then
+  best=$(awk 'NR==1{print $3}' "$TMP/ok.txt"); echo "Выбран сайт для маскировки: $best"; echo "$best" >&3
+else
+  echo "Выберите домен из верхней группы и подставьте в установку: SNI=домен"
+fi
