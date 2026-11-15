@@ -12,6 +12,10 @@
 #     PORT=8443                      порт VPN (по умолчанию 443)
 #     FORCE=1                        переустановить с новыми ключами
 #                                    (старые ссылки перестанут работать)
+#     UPSTREAM='vless://...'         режим ПРОМЕЖУТОЧНОГО сервера (в РФ):
+#                                    ссылка на зарубежный сервер (vpnctl add relay
+#                                    на нём). Российские сайты выходят напрямую
+#                                    с этого сервера, остальное — через зарубежный.
 #
 #  После установки управление клиентами: vpnctl help
 # =====================================================================
@@ -22,6 +26,7 @@ SNI="${SNI:-}"
 SERVER_IP="${SERVER_IP:-}"
 FORCE="${FORCE:-0}"
 PORT="${PORT:-443}"
+UPSTREAM="${UPSTREAM:-}"
 SNI_CANDIDATES="www.samsung.com www.nvidia.com www.amd.com www.intel.com www.asus.com"
 
 XRAY_DIR=/usr/local/etc/xray
@@ -44,6 +49,23 @@ fi
 for n in $CLIENTS; do
   [[ "$n" =~ ^[A-Za-z0-9_-]+$ ]] || die "Имя клиента '$n': только латиница, цифры, - и _"
 done
+
+# Разбор ссылки на зарубежный сервер (режим промежуточного сервера)
+if [ -n "$UPSTREAM" ]; then
+  [[ "$UPSTREAM" == vless://* ]] || die "UPSTREAM должен начинаться с vless://"
+  _l="${UPSTREAM#vless://}"; _l="${_l%%#*}"
+  UP_ID="${_l%%@*}"; _r="${_l#*@}"
+  _hp="${_r%%\?*}"; _q="${_r#*\?}"
+  UP_HOST="${_hp%:*}"; UP_PORT="${_hp##*:}"
+  qp() { tr '&' '\n' <<<"$_q" | sed -n "s/^$1=//p" | head -1; }
+  urldec() { local v="${1//+/ }"; printf '%b' "${v//%/\\x}"; }
+  UP_SNI=$(qp sni); UP_PBK=$(qp pbk); UP_SID=$(qp sid); UP_FP=$(qp fp)
+  UP_PATH=$(urldec "$(qp path)"); UP_MODE=$(qp mode); UP_TYPE=$(qp type); UP_SEC=$(qp security)
+  [ "$UP_TYPE" = "xhttp" ] && [ "$UP_SEC" = "reality" ] || die "UPSTREAM: нужна ссылка VLESS + REALITY + XHTTP (type=xhttp, security=reality)"
+  [ -n "$UP_ID" ] && [ -n "$UP_HOST" ] && [ -n "$UP_PBK" ] && [ -n "$UP_SNI" ] || die "UPSTREAM: в ссылке не хватает параметров"
+  [[ "$UP_PORT" =~ ^[0-9]+$ ]] || die "UPSTREAM: не удалось разобрать порт"
+  UP_FP=${UP_FP:-chrome}; UP_MODE=${UP_MODE:-auto}; UP_PATH=${UP_PATH:-/}
+fi
 
 # ---------- 1. Пакеты ----------
 say "Устанавливаю пакеты"
@@ -109,11 +131,42 @@ for n in $CLIENTS; do
   CLIENTS_JSON=$(jq --arg id "$(xray uuid)" --arg n "$n" '. + [{id:$id, email:$n}]' <<<"$CLIENTS_JSON")
 done
 
-[ -f "$CFG" ] && cp "$CFG" "$CFG.bak.$(date +%s)"
+BLOCK_RULES='[
+  {"type":"field","ip":["geoip:private"],"outboundTag":"block"},
+  {"type":"field","protocol":["bittorrent"],"outboundTag":"block"}]'
+if [ -z "$UPSTREAM" ]; then
+  OUTBOUNDS='[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}},
+              {"tag":"block","protocol":"blackhole"}]'
+  RULES="$BLOCK_RULES"
+else
+  # Первый outbound — маршрут по умолчанию: всё, что не российское, идёт за границу
+  OUTBOUNDS=$(jq -n --arg h "$UP_HOST" --argjson p "$UP_PORT" --arg id "$UP_ID" \
+    --arg sni "$UP_SNI" --arg pbk "$UP_PBK" --arg sid "$UP_SID" --arg fp "$UP_FP" \
+    --arg path "$UP_PATH" --arg mode "$UP_MODE" '[
+    {tag:"foreign", protocol:"vless",
+     settings:{vnext:[{address:$h, port:$p, users:[{id:$id, encryption:"none"}]}]},
+     streamSettings:{network:"xhttp", xhttpSettings:{path:$path, mode:$mode},
+       security:"reality",
+       realitySettings:{serverName:$sni, fingerprint:$fp, publicKey:$pbk, shortId:$sid}}},
+    {tag:"direct", protocol:"freedom", settings:{domainStrategy:"UseIPv4"}},
+    {tag:"block",  protocol:"blackhole"}]')
+  ru_rules() {  # $1 = 1 — с geosite:category-ru, 0 — без него
+    jq -n --argjson block "$BLOCK_RULES" --argjson geo "$1" '
+      $block + [
+        {type:"field", outboundTag:"direct",
+         domain:((if $geo==1 then ["geosite:category-ru"] else [] end)
+                 + ["regexp:\\.ru$","regexp:\\.su$","regexp:\\.xn--p1ai$"])},
+        {type:"field", outboundTag:"direct", ip:["geoip:ru"]}
+      ]'
+  }
+  RULES=$(ru_rules 1)
+fi
+
+build_cfg() {
 jq -n \
   --argjson clients "$CLIENTS_JSON" \
   --arg sni "$SNI" --arg priv "$PRIV" --arg sid "$SID" --arg path "$XPATH" \
-  --argjson port "$PORT" '
+  --argjson port "$PORT" --argjson outbounds "$OUTBOUNDS" --argjson rules "$RULES" '
 {
   log: {loglevel: "warning"},
   inbounds: [{
@@ -130,22 +183,21 @@ jq -n \
     },
     sniffing: {enabled: true, destOverride: ["http","tls","quic"], routeOnly: true}
   }],
-  outbounds: [
-    {tag: "direct", protocol: "freedom", settings: {domainStrategy: "UseIPv4"}},
-    {tag: "block",  protocol: "blackhole"}
-  ],
-  routing: {
-    domainStrategy: "IPIfNonMatch",
-    rules: [
-      {type: "field", ip: ["geoip:private"], outboundTag: "block"},
-      {type: "field", protocol: ["bittorrent"], outboundTag: "block"}
-    ]
-  }
+  outbounds: $outbounds,
+  routing: {domainStrategy: "IPIfNonMatch", rules: $rules}
 }' > "$NEW"
-
+}
+[ -f "$CFG" ] && cp "$CFG" "$CFG.bak.$(date +%s)"
+build_cfg
 if ! TEST_OUT=$(xray run -test -config "$NEW" 2>&1); then
-  echo "$TEST_OUT" | tail -15
-  die "Xray отклонил конфиг: $NEW (причина выше)"
+  if [ -n "$UPSTREAM" ] && grep -qi "category-ru" <<<"$TEST_OUT"; then
+    warn "В geosite нет списка category-ru — российские сайты определяю по доменам .ru/.su/.рф и IP"
+    RULES=$(ru_rules 0); build_cfg
+    TEST_OUT=$(xray run -test -config "$NEW" 2>&1) || { echo "$TEST_OUT" | tail -15; die "Xray отклонил конфиг: $NEW (причина выше)"; }
+  else
+    echo "$TEST_OUT" | tail -15
+    die "Xray отклонил конфиг: $NEW (причина выше)"
+  fi
 fi
 mv "$NEW" "$CFG"
 chmod 644 "$CFG"
@@ -236,11 +288,22 @@ systemctl restart xray
 sleep 2
 systemctl is-active --quiet xray || { journalctl -u xray -n 30 --no-pager; die "Xray не запустился"; }
 
+if [ -n "$UPSTREAM" ]; then
+  say "Проверяю связь с зарубежным сервером"
+  sleep 1
+  if timeout 5 bash -c "</dev/tcp/$UP_HOST/$UP_PORT" 2>/dev/null; then
+    echo "Зарубежный сервер $UP_HOST:$UP_PORT доступен"
+  else
+    warn "Не могу достучаться до $UP_HOST:$UP_PORT — проверьте, что зарубежный сервер работает"
+  fi
+fi
+
 # ---------- 10. Ссылки ----------
 : > "$LINKS_FILE"; chmod 600 "$LINKS_FILE"
 for n in $CLIENTS; do vpnctl link "$n" >> "$LINKS_FILE"; done
 
 say "Готово! VLESS + REALITY + XHTTP на $SERVER_IP:$PORT (маскировка: $SNI)"
+[ -n "$UPSTREAM" ] && echo "Режим промежуточного сервера: российские сайты — напрямую отсюда, остальное — через $UP_HOST"
 vpnctl all
 cat <<EOF
 
