@@ -8,7 +8,7 @@
 #  отсюда, всё остальное — через зарубежный сервер.
 # =====================================================================
 set -euo pipefail
-REF=ca421351dd8790b5496ace45e9aa43dcdb621442
+REF=83fce3b962843977a8fc19484d4600cd379a179c
 BASE="https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/$REF/vpn"
 [ "$(id -u)" -eq 0 ] || { echo "Запустите от root"; exit 1; }
 UP="${1:-}"
@@ -29,4 +29,4 @@ if [ -z "$SNI" ]; then
   [ -n "$SNI" ] && echo "Сайт: $SNI" || echo "Не нашёл подходящий — возьму стандартный"
 fi
 
-UPSTREAM="$UP" SNI="$SNI" CLIENTS="${CLIENTS:-me}" FORCE=1 bash /root/vpn-setup.sh
+UPSTREAM="$UP" SNI="$SNI" CLIENTS="${CLIENTS:-VPN_Amsterdam}" FORCE=1 bash /root/vpn-setup.sh
