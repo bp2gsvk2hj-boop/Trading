@@ -7,6 +7,7 @@
 #
 #  Необязательные параметры (переменные окружения):
 #     CLIENTS="phone tablet laptop"  имена устройств, по одному UUID на каждое
+#                                    (_ в имени показывается в приложении как пробел)
 #     SNI=www.example.com            сайт для маскировки (иначе подбирается сам)
 #     SERVER_IP=1.2.3.4              внешний IP (иначе определяется сам)
 #     PORT=8443                      порт VPN (по умолчанию 443)
@@ -226,7 +227,7 @@ uuid_of() { jq -r --arg n "$1" '.inbounds[0].settings.clients[] | select(.email=
 names()   { jq -r '.inbounds[0].settings.clients[].email' "$CFG"; }
 link() {
   local id; id=$(uuid_of "$1"); [ -n "$id" ] || { echo "Нет клиента '$1'"; exit 1; }
-  echo "vless://${id}@${SERVER_IP}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUB}&sid=${SID}&type=xhttp&path=%2F${XPATH#/}&mode=auto#${1}"
+  echo "vless://${id}@${SERVER_IP}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUB}&sid=${SID}&type=xhttp&path=%2F${XPATH#/}&mode=auto#${1//_/%20}"
 }
 apply() {
   xray run -test -config "$NEW" >/tmp/xray-test.log 2>&1 || { tail -15 /tmp/xray-test.log; echo "Ошибка в конфиге, изменения не применены"; rm -f "$NEW"; exit 1; }
