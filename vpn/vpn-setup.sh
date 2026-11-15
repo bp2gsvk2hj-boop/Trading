@@ -26,6 +26,7 @@ SNI_CANDIDATES="www.samsung.com www.nvidia.com www.amd.com www.intel.com www.asu
 
 XRAY_DIR=/usr/local/etc/xray
 CFG="$XRAY_DIR/config.json"
+NEW="$XRAY_DIR/config.new.json"   # Xray определяет формат по расширению
 ENV_FILE="$XRAY_DIR/vpn.env"
 LINKS_FILE=/root/vpn-links.txt
 
@@ -139,13 +140,13 @@ jq -n \
       {type: "field", protocol: ["bittorrent"], outboundTag: "block"}
     ]
   }
-}' > "$CFG.new"
+}' > "$NEW"
 
-if ! TEST_OUT=$(xray run -test -config "$CFG.new" 2>&1); then
+if ! TEST_OUT=$(xray run -test -config "$NEW" 2>&1); then
   echo "$TEST_OUT" | tail -15
-  die "Xray отклонил конфиг: $CFG.new (причина выше)"
+  die "Xray отклонил конфиг: $NEW (причина выше)"
 fi
-mv "$CFG.new" "$CFG"
+mv "$NEW" "$CFG"
 chmod 644 "$CFG"
 
 cat > "$ENV_FILE" <<EOF
@@ -164,6 +165,7 @@ cat > /usr/local/bin/vpnctl <<'VPNCTL'
 # Управление клиентами VPN: vpnctl help
 set -euo pipefail
 CFG=/usr/local/etc/xray/config.json
+NEW=/usr/local/etc/xray/config.new.json
 . /usr/local/etc/xray/vpn.env
 [ "$(id -u)" -eq 0 ] || { echo "Нужен root: sudo vpnctl $*"; exit 1; }
 
@@ -174,8 +176,8 @@ link() {
   echo "vless://${id}@${SERVER_IP}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUB}&sid=${SID}&type=xhttp&path=%2F${XPATH#/}&mode=auto#${1}"
 }
 apply() {
-  xray run -test -config "$CFG.new" >/tmp/xray-test.log 2>&1 || { tail -15 /tmp/xray-test.log; echo "Ошибка в конфиге, изменения не применены"; rm -f "$CFG.new"; exit 1; }
-  cp "$CFG" "$CFG.bak"; mv "$CFG.new" "$CFG"; chmod 644 "$CFG"
+  xray run -test -config "$NEW" >/tmp/xray-test.log 2>&1 || { tail -15 /tmp/xray-test.log; echo "Ошибка в конфиге, изменения не применены"; rm -f "$NEW"; exit 1; }
+  cp "$CFG" "$CFG.bak"; mv "$NEW" "$CFG"; chmod 644 "$CFG"
   systemctl restart xray
 }
 show() { echo; echo "── $1 ──"; link "$1"; qrencode -t ansiutf8 "$(link "$1")"; }
@@ -189,11 +191,11 @@ case "${1:-help}" in
     n="${2:?имя}"
     [[ "$n" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "Только латиница, цифры, - и _"; exit 1; }
     [ -z "$(uuid_of "$n")" ] || { echo "Клиент '$n' уже есть"; exit 1; }
-    jq --arg id "$(xray uuid)" --arg n "$n" '.inbounds[0].settings.clients += [{id:$id, email:$n}]' "$CFG" > "$CFG.new"
+    jq --arg id "$(xray uuid)" --arg n "$n" '.inbounds[0].settings.clients += [{id:$id, email:$n}]' "$CFG" > "$NEW"
     apply; show "$n" ;;
   del)
     n="${2:?имя}"; [ -n "$(uuid_of "$n")" ] || { echo "Нет клиента '$n'"; exit 1; }
-    jq --arg n "$n" 'del(.inbounds[0].settings.clients[] | select(.email==$n))' "$CFG" > "$CFG.new"
+    jq --arg n "$n" 'del(.inbounds[0].settings.clients[] | select(.email==$n))' "$CFG" > "$NEW"
     apply; echo "Клиент '$n' удалён, его ссылка больше не работает" ;;
   status) systemctl --no-pager status xray | head -5 ;;
   *) cat <<H
