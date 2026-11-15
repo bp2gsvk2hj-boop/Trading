@@ -45,8 +45,11 @@ done
 # ---------- 1. Пакеты ----------
 say "Устанавливаю пакеты"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq curl jq qrencode openssl ufw ca-certificates iproute2 >/dev/null
+# Новые VPS часто сами ставят обновления в фоне: ждём их и чиним прерванный dpkg
+APT_OPTS="-o DPkg::Lock::Timeout=600"
+dpkg --configure -a || true
+apt-get $APT_OPTS update -qq
+apt-get $APT_OPTS install -y -qq curl jq qrencode openssl ufw ca-certificates iproute2 >/dev/null
 
 if ss -ltnp "sport = :$PORT" | grep -q LISTEN && ! ss -ltnp "sport = :$PORT" | grep -q xray; then
   ss -ltnp "sport = :$PORT"
