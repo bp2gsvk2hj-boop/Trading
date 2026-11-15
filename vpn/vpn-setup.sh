@@ -33,6 +33,7 @@ LINKS_FILE=/root/vpn-links.txt
 say()  { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[!] %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m[x] %s\033[0m\n' "$*" >&2; exit 1; }
+trap 'printf "\033[1;31m[x] Ошибка в строке %s: %s\033[0m\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 # ---------- 0. Проверки ----------
 [ "$(id -u)" -eq 0 ] || die "Запустите от root: sudo bash $0"
@@ -219,7 +220,9 @@ net.ipv4.tcp_congestion_control=bbr
 EOF
 sysctl --system >/dev/null 2>&1 || true
 
-SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
+# Порт текущей SSH-сессии надёжнее всего; запасной путь — sshd -T (падает на Ubuntu 24.04 без /run/sshd)
+SSH_PORT=$(echo "${SSH_CONNECTION:-}" | awk '{print $4}')
+[ -n "$SSH_PORT" ] || SSH_PORT=$( { sshd -T 2>/dev/null || true; } | awk '/^port /{print $2; exit}')
 SSH_PORT=${SSH_PORT:-22}
 ufw allow "$SSH_PORT/tcp" >/dev/null
 ufw allow "$PORT/tcp" >/dev/null
