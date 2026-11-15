@@ -9,6 +9,7 @@
 #     CLIENTS="phone tablet laptop"  имена устройств, по одному UUID на каждое
 #     SNI=www.example.com            сайт для маскировки (иначе подбирается сам)
 #     SERVER_IP=1.2.3.4              внешний IP (иначе определяется сам)
+#     PORT=8443                      порт VPN (по умолчанию 443)
 #     FORCE=1                        переустановить с новыми ключами
 #                                    (старые ссылки перестанут работать)
 #
@@ -20,7 +21,7 @@ CLIENTS="${CLIENTS:-phone tablet laptop}"
 SNI="${SNI:-}"
 SERVER_IP="${SERVER_IP:-}"
 FORCE="${FORCE:-0}"
-PORT=443
+PORT="${PORT:-443}"
 SNI_CANDIDATES="www.samsung.com www.nvidia.com www.amd.com www.intel.com www.asus.com"
 
 XRAY_DIR=/usr/local/etc/xray
