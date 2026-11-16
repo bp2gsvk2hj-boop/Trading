@@ -9,7 +9,7 @@
 set -euo pipefail
 REF=a3b10d86c948c19cfeef526aa50c9d019abc4e3c
 BASE="https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/$REF/vpn"
-RU_URL="https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/2fccc50ea67d6826919447cff54844cf93a89db5/vpn/ru.sh"
+RU_URL="https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/e702b153ff5472bca473260a43e40ae52332cefb/vpn/ru.sh"
 [ "$(id -u)" -eq 0 ] || { echo "Запустите от root"; exit 1; }
 
 if [ ! -f /usr/local/etc/xray/vpn.env ]; then
