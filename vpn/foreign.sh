@@ -7,7 +7,7 @@
 #  Повторный запуск безопасен: ключи и ссылки не меняются.
 # =====================================================================
 set -euo pipefail
-REF=3a98ed7ae6ad2d34d16b842c255f64d2b9dcc621
+REF=224e476717affb5acd52566fa474d016fb208465
 BASE="https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/$REF/vpn"
 RU_URL="https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/f4e1f36ff3b7dd57360cb83a8e1c7040797c274d/vpn/ru.sh"
 [ "$(id -u)" -eq 0 ] || { echo "Запустите от root"; exit 1; }
