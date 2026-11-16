@@ -11,6 +11,8 @@
 #     SNI=www.example.com            сайт для маскировки (иначе подбирается сам)
 #     SERVER_IP=1.2.3.4              внешний IP (иначе определяется сам)
 #     PORT=8443                      порт VPN (по умолчанию 443)
+#     KEEP=1                         перенастроить, СОХРАНИВ ключи и ссылки клиентов
+#                                    (например, добавить резервный сервер)
 #     FORCE=1                        переустановить с новыми ключами
 #                                    (старые ссылки перестанут работать)
 #     UPSTREAM='vless://...'         режим ПРОМЕЖУТОЧНОГО сервера (в РФ):
@@ -30,6 +32,7 @@ CLIENTS="${CLIENTS:-phone tablet laptop}"
 SNI="${SNI:-}"
 SERVER_IP="${SERVER_IP:-}"
 FORCE="${FORCE:-0}"
+KEEP="${KEEP:-0}"
 PORT="${PORT:-443}"
 UPSTREAM="${UPSTREAM:-}"
 UPSTREAM2="${UPSTREAM2:-}"
@@ -51,8 +54,13 @@ trap 'printf "\033[1;31m[x] Ошибка в строке %s: %s\033[0m\n" "$LINE
 # ---------- 0. Проверки ----------
 [ "$(id -u)" -eq 0 ] || die "Запустите от root: sudo bash $0"
 grep -qi ubuntu /etc/os-release || warn "Скрипт рассчитан на Ubuntu, продолжаю на свой риск."
-if [ -f "$ENV_FILE" ] && [ "$FORCE" != "1" ]; then
-  die "VPN уже установлен. Ссылки: vpnctl all. Переустановка с новыми ключами: FORCE=1 bash $0"
+if [ -f "$ENV_FILE" ] && [ "$FORCE" != "1" ] && [ "$KEEP" != "1" ]; then
+  die "VPN уже установлен. Ссылки: vpnctl all. Перенастроить с сохранением ссылок: KEEP=1 bash $0; с новыми ключами: FORCE=1 bash $0"
+fi
+if [ "$KEEP" = "1" ]; then
+  [ -f "$ENV_FILE" ] && [ -f "$CFG" ] || die "KEEP=1: нет прежней установки для сохранения"
+  OLD_ENV=$(cat "$ENV_FILE")
+  oldv() { sed -n "s/^$1=//p" <<<"$OLD_ENV" | head -1; }
 fi
 for n in $CLIENTS; do
   [[ "$n" =~ ^[A-Za-z0-9_-]+$ ]] || die "Имя клиента '$n': только латиница, цифры, - и _"
@@ -120,6 +128,17 @@ fi
 echo "Xray $XVER"
 
 # ---------- 3. Ключи и параметры ----------
+if [ "$KEEP" = "1" ]; then
+say "Сохраняю прежние ключи и ссылки"
+PRIV=$(jq -r '.inbounds[0].streamSettings.realitySettings.privateKey' "$CFG")
+SID=$(jq -r '.inbounds[0].streamSettings.realitySettings.shortIds[0]' "$CFG")
+XPATH=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.path' "$CFG")
+SNI=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0]' "$CFG")
+PUB=$(oldv PUB); SERVER_IP=${SERVER_IP:-$(oldv SERVER_IP)}
+[ -z "$TG_TOKEN" ] && { TG_TOKEN=$(oldv TG_TOKEN); TG_CHAT=${TG_CHAT:-$(oldv TG_CHAT)}; }
+[ "$TG_TOKEN" = "$(oldv TG_TOKEN)" ] && TG_CHAT=${TG_CHAT:-$(oldv TG_CHAT)}
+[ ${#PRIV} -ge 40 ] && [ ${#PUB} -ge 40 ] && [ -n "$SID" ] && [ -n "$XPATH" ] || die "KEEP=1: не удалось прочитать прежние ключи"
+else
 say "Генерирую ключи"
 KEYS=$(xray x25519)
 # Старый формат: "Private key / Public key", новый: "PrivateKey / Password"
@@ -128,6 +147,7 @@ PUB=$(sed -n '2s/^[^:]*:[[:space:]]*//p' <<<"$KEYS" | tr -d '\r ')
 [ ${#PRIV} -ge 40 ] && [ ${#PUB} -ge 40 ] || die "Не удалось разобрать вывод 'xray x25519': $KEYS"
 SID=$(openssl rand -hex 8)
 XPATH="/$(openssl rand -hex 6)"
+fi
 
 # ---------- 4. Сайт для маскировки ----------
 sni_ok() {  # нужен TLS 1.3 и HTTP/2
@@ -154,10 +174,15 @@ echo "IP: $SERVER_IP"
 
 # ---------- 6. Конфиг Xray ----------
 say "Пишу конфигурацию"
-CLIENTS_JSON='[]'
-for n in $CLIENTS; do
-  CLIENTS_JSON=$(jq --arg id "$(xray uuid)" --arg n "$n" '. + [{id:$id, email:$n}]' <<<"$CLIENTS_JSON")
-done
+if [ "$KEEP" = "1" ]; then
+  CLIENTS_JSON=$(jq -c '.inbounds[0].settings.clients' "$CFG")
+  CLIENTS=$(jq -r '.[].email' <<<"$CLIENTS_JSON" | tr '\n' ' ')
+else
+  CLIENTS_JSON='[]'
+  for n in $CLIENTS; do
+    CLIENTS_JSON=$(jq --arg id "$(xray uuid)" --arg n "$n" '. + [{id:$id, email:$n}]' <<<"$CLIENTS_JSON")
+  done
+fi
 
 BLOCK_RULES='[
   {"type":"field","ip":["geoip:private"],"outboundTag":"block"},

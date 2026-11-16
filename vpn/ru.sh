@@ -5,6 +5,8 @@
 #     bash ru.sh 'vless://...основной...'
 #  С резервным сервером и уведомлениями в Telegram:
 #     TG_TOKEN=123:ABC bash ru.sh 'vless://...основной...' 'vless://...резерв...'
+#  Повторный запуск (например, чтобы добавить или сменить резерв) сохраняет
+#  ссылки в приложениях. Полная переустановка с новыми ключами: FORCE=1.
 #  Сам подбирает российский сайт для маскировки, ставит VPN и выдаёт
 #  ссылку и QR-код (одна на все устройства). Российские сайты идут напрямую
 #  отсюда, всё остальное — через зарубежный сервер.
@@ -17,19 +19,22 @@ UP="${1:-}"; UP2="${2:-}"
 [[ "$UP" == vless://* ]] || { echo "Нужна ссылка на зарубежный сервер: bash ru.sh 'vless://...'"; exit 1; }
 [ -z "$UP2" ] || [[ "$UP2" == vless://* ]] || { echo "Вторая ссылка (резерв) должна начинаться с vless://"; exit 1; }
 
+KEEP=0
 if [ -f /usr/local/etc/xray/vpn.env ] && [ "${FORCE:-0}" != "1" ]; then
-  echo "VPN здесь уже установлен. Ссылки:"; vpnctl all; exit 0
+  # Уже установлен: перенастраиваем зарубежные серверы, ссылки клиентов НЕ меняются
+  echo "VPN здесь уже установлен — обновляю список зарубежных серверов, ссылки в приложениях останутся прежними."
+  KEEP=1
 fi
 
 curl -fsSL "$BASE/vpn-setup.sh" -o /root/vpn-setup.sh
 curl -fsSL "$BASE/sni-pick.sh"  -o /root/sni-pick.sh
 
 SNI="${SNI:-}"
-if [ -z "$SNI" ]; then
+if [ -z "$SNI" ] && [ "$KEEP" = 0 ]; then
   apt-get update -qq >/dev/null 2>&1 || true
   printf '\n\033[1;32m==> %s\033[0m\n' "Подбираю российский сайт для маскировки (2–3 минуты)"
   SNI=$(bash /root/sni-pick.sh --auto 2>/dev/null | tail -1 || true)
   [ -n "$SNI" ] && echo "Сайт: $SNI" || echo "Не нашёл подходящий — возьму стандартный"
 fi
 
-UPSTREAM="$UP" UPSTREAM2="$UP2" TG_TOKEN="${TG_TOKEN:-}" SNI="$SNI" CLIENTS="${CLIENTS:-VPN_Amsterdam}" FORCE=1 bash /root/vpn-setup.sh
+KEEP="$KEEP" UPSTREAM="$UP" UPSTREAM2="$UP2" TG_TOKEN="${TG_TOKEN:-}" SNI="$SNI" CLIENTS="${CLIENTS:-VPN_Amsterdam}" FORCE=$((1-KEEP)) bash /root/vpn-setup.sh
