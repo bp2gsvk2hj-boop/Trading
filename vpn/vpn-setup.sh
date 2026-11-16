@@ -343,7 +343,7 @@ if [ -n "$UPSTREAM" ]; then
   cat > /usr/local/bin/vpn-monitor <<'MON'
 #!/usr/bin/env bash
 # Проверяет зарубежные серверы ИЗ РОССИИ (через этот сервер) и шлёт уведомления в Telegram.
-# vpn-monitor          — проверка (запускается таймером раз в минуту)
+# vpn-monitor          — проверка (запускается таймером раз в 15 минут)
 # vpn-monitor status   — показать состояние сейчас
 # vpn-monitor test     — отправить тестовое сообщение
 . /usr/local/etc/xray/vpn.env
@@ -362,10 +362,10 @@ NAMES=("" "VPS 1 (основной, ${UP1_HOST})" "VPS 2 (резерв, ${UP2_HO
 N=1; [ -n "${UP2_HOST:-}" ] && N=2
 case "${1:-}" in
   status) for i in $(seq 1 $N); do if probe $((10810+i)); then echo "✓ ${NAMES[$i]} доступен"; else echo "✗ ${NAMES[$i]} НЕ доступен"; fi; done; exit 0 ;;
-  test)   tg "✅ Мониторинг VPN работает ($(hostname)). Проверяю серверы из России раз в минуту."; echo "Отправлено"; exit 0 ;;
+  test)   tg "✅ Мониторинг VPN работает ($(hostname)). Проверяю серверы из России раз в 15 минут, пишу только при изменениях."; echo "Отправлено"; exit 0 ;;
 esac
 for i in $(seq 1 $N); do
-  if probe $((10810+i)) || probe $((10810+i)); then
+  if probe $((10810+i)) || { sleep 20; probe $((10810+i)); } || { sleep 20; probe $((10810+i)); }; then
     [ "$(cat "$ST/s$i" 2>/dev/null)" = down ] && {
       echo up > "$ST/s$i"
       if [ "$i" = 1 ] && [ "$N" = 2 ]; then tg "🟢 ${NAMES[1]} снова доступен из России. Трафик вернулся на основной сервер."
@@ -373,7 +373,7 @@ for i in $(seq 1 $N); do
     echo 0 > "$ST/f$i"
   else
     f=$(( $(cat "$ST/f$i" 2>/dev/null || echo 0) + 1 )); echo $f > "$ST/f$i"
-    if [ $f -eq 2 ]; then   # две неудачи подряд = не случайный сбой
+    if [ $f -eq 1 ]; then   # три неудачные попытки за минуту = не случайный сбой
       echo down > "$ST/s$i"
       if [ "$i" = 1 ] && [ "$N" = 2 ] && [ "$(cat "$ST/s2" 2>/dev/null)" != down ]; then
         tg "🔴 ${NAMES[1]} недоступен из России. Трафик автоматически переключён на ${NAMES[2]}. Смените IP основного сервера."
@@ -399,10 +399,10 @@ ExecStart=/usr/local/bin/vpn-monitor
 EOF
   cat > /etc/systemd/system/vpn-monitor.timer <<'EOF'
 [Unit]
-Description=Проверка зарубежных VPN-серверов раз в минуту
+Description=Проверка зарубежных VPN-серверов раз в 15 минут
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=1min
+OnBootSec=5min
+OnUnitActiveSec=15min
 [Install]
 WantedBy=timers.target
 EOF
