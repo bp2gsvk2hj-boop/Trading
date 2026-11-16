@@ -53,10 +53,18 @@ PersistentKeepalive = 25
 CONF
 chmod 600 /root/keenetic.conf
 
-printf '\n\033[1;32m==> Готово: WireGuard для Keenetic на %s:%s/udp\033[0m\n\n' "$SERVER_IP" "$PORT"
-echo "Файл для роутера: /root/keenetic.conf"
-echo "Содержимое (можно скопировать в файл keenetic.conf):"
-echo "------------------------------------------------------------"
-cat /root/keenetic.conf
-echo "------------------------------------------------------------"
-echo "ВАЖНО: в Yandex Cloud в группе безопасности разрешите входящий UDP $PORT (источник 0.0.0.0/0)."
+printf '\n\033[1;32m==> Готово: WireGuard для Keenetic на %s:%s/udp\033[0m\n' "$SERVER_IP" "$PORT"
+SENT=0
+if [ -n "${TG_TOKEN:-}" ] && [ -n "${TG_CHAT:-}" ]; then
+  for via in "socks5h://127.0.0.1:10810" ""; do
+    if curl -s -m 30 ${via:+-x "$via"} -F "chat_id=$TG_CHAT" -F "document=@/root/keenetic.conf" \
+         -F "caption=Файл для Keenetic: Интернет → Другие подключения → WireGuard → Загрузить из файла. Никому не пересылайте." \
+         "https://api.telegram.org/bot$TG_TOKEN/sendDocument" | grep -q '"ok":true'; then SENT=1; break; fi
+  done
+fi
+if [ "$SENT" = 1 ]; then
+  echo "Файл keenetic.conf отправлен вам в Telegram (в чат с вашим ботом)."
+else
+  echo "Не удалось отправить в Telegram. Файл лежит на сервере: /root/keenetic.conf"
+fi
+echo "Если роутер не подключится: в Yandex Cloud разрешите входящий UDP $PORT (группа безопасности, источник 0.0.0.0/0)."
