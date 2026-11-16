@@ -146,7 +146,7 @@ PRIV=$(sed -n '1s/^[^:]*:[[:space:]]*//p' <<<"$KEYS" | tr -d '\r ')
 PUB=$(sed -n '2s/^[^:]*:[[:space:]]*//p' <<<"$KEYS" | tr -d '\r ')
 [ ${#PRIV} -ge 40 ] && [ ${#PUB} -ge 40 ] || die "Не удалось разобрать вывод 'xray x25519': $KEYS"
 SID=$(openssl rand -hex 8)
-XPATH="/$(openssl rand -hex 6)"
+XPATH="/"   # путь "/" — совместим с любыми клиентами (Amnezia не передаёт path из ссылки)
 fi
 
 # ---------- 4. Сайт для маскировки ----------

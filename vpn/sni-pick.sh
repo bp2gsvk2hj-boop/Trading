@@ -14,7 +14,7 @@ set -uo pipefail
 AUTO=0; [ "${1:-}" = "--auto" ] && { AUTO=1; exec 3>&1 1>&2; }
 
 LIST_URL="https://github.com/ancored/ru-mobile-whitelist/releases/latest/download/ru-mobile-whitelist-sni.txt"
-SKIP='(^|\.)(google|gstatic|youtube|yandex|ya|yastatic|yandexcloud|vk|vkontakte|vkvideo|userapi|mail|ok|dzen|gosuslugi|gov|kremlin|government|sber|sberbank|tbank|tinkoff|vtb|ozon|wildberries|wb|avito|mts|megafon|beeline|tele2|t2|rutube|apple|icloud|microsoft|cloudflare|max)\.'
+SKIP='(^|\.)(google|gstatic|youtube|yandex|ya|yastatic|yandexcloud|auto|kinopoisk|market|eda|lavka|dzen|vk|vkontakte|vkvideo|userapi|mail|ok|dzen|gosuslugi|gov|kremlin|government|sber|sberbank|tbank|tinkoff|vtb|ozon|wildberries|wb|avito|mts|megafon|beeline|tele2|t2|rutube|apple|icloud|microsoft|cloudflare|max)\.'
 TMP=$(mktemp -d)
 trap 'rm -r "$TMP"' EXIT
 
