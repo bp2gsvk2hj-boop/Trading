@@ -17,6 +17,10 @@
 #                                    ссылка на зарубежный сервер (vpnctl add relay
 #                                    на нём). Российские сайты выходят напрямую
 #                                    с этого сервера, остальное — через зарубежный.
+#     UPSTREAM2='vless://...'        резервный зарубежный сервер: Xray сам
+#                                    переключается на него, если основной недоступен
+#     TG_TOKEN=123:ABC               токен Telegram-бота для уведомлений
+#                                    (мониторинг включается в режиме UPSTREAM)
 #
 #  После установки управление клиентами: vpnctl help
 # =====================================================================
@@ -28,6 +32,9 @@ SERVER_IP="${SERVER_IP:-}"
 FORCE="${FORCE:-0}"
 PORT="${PORT:-443}"
 UPSTREAM="${UPSTREAM:-}"
+UPSTREAM2="${UPSTREAM2:-}"
+TG_TOKEN="${TG_TOKEN:-}"
+TG_CHAT="${TG_CHAT:-}"
 SNI_CANDIDATES="www.samsung.com www.nvidia.com www.amd.com www.intel.com www.asus.com"
 
 XRAY_DIR=/usr/local/etc/xray
@@ -51,23 +58,31 @@ for n in $CLIENTS; do
   [[ "$n" =~ ^[A-Za-z0-9_-]+$ ]] || die "Имя клиента '$n': только латиница, цифры, - и _"
 done
 
-# Разбор ссылки на зарубежный сервер (режим промежуточного сервера)
-if [ -n "$UPSTREAM" ]; then
-  [[ "$UPSTREAM" == vless://* ]] || die "UPSTREAM должен начинаться с vless://"
-  _l="${UPSTREAM#vless://}"; _l="${_l%%#*}"
-  UP_ID="${_l%%@*}"; _r="${_l#*@}"
-  _hp="${_r%%\?*}"; _q="${_r#*\?}"
-  UP_HOST="${_hp%:*}"; UP_PORT="${_hp##*:}"
-  qp() { tr '&' '\n' <<<"$_q" | sed -n "s/^$1=//p" | head -1; }
+# Разбор ссылки vless:// в outbound Xray (JSON). $1 — ссылка, $2 — тег
+link_outbound() {
+  local L="$1" tag="$2" l r hp q id host port
+  [[ "$L" == vless://* ]] || { echo "ссылка должна начинаться с vless://" >&2; return 1; }
+  l="${L#vless://}"; l="${l%%#*}"
+  id="${l%%@*}"; r="${l#*@}"
+  hp="${r%%\?*}"; q="${r#*\?}"
+  host="${hp%:*}"; port="${hp##*:}"
+  qp() { tr '&' '\n' <<<"$q" | sed -n "s/^$1=//p" | head -1; }
   urldec() { local v="${1//+/ }"; printf '%b' "${v//%/\\x}"; }
-  UP_SNI=$(qp sni); UP_PBK=$(qp pbk); UP_SID=$(qp sid); UP_FP=$(qp fp)
-  UP_PATH=$(urldec "$(qp path)"); UP_MODE=$(qp mode); UP_TYPE=$(qp type); UP_SEC=$(qp security)
-  [ "$UP_TYPE" = "xhttp" ] && [ "$UP_SEC" = "reality" ] || die "UPSTREAM: нужна ссылка VLESS + REALITY + XHTTP (type=xhttp, security=reality)"
-  [ -n "$UP_ID" ] && [ -n "$UP_HOST" ] && [ -n "$UP_PBK" ] && [ -n "$UP_SNI" ] || die "UPSTREAM: в ссылке не хватает параметров"
-  [[ "$UP_PORT" =~ ^[0-9]+$ ]] || die "UPSTREAM: не удалось разобрать порт"
-  UP_FP=${UP_FP:-chrome}; UP_MODE=${UP_MODE:-auto}; UP_PATH=${UP_PATH:-/}
-fi
-
+  local sni pbk sid fp path mode type sec
+  sni=$(qp sni); pbk=$(qp pbk); sid=$(qp sid); fp=$(qp fp)
+  path=$(urldec "$(qp path)"); mode=$(qp mode); type=$(qp type); sec=$(qp security)
+  [ "$type" = "xhttp" ] && [ "$sec" = "reality" ] || { echo "нужна ссылка VLESS + REALITY + XHTTP" >&2; return 1; }
+  [ -n "$id" ] && [ -n "$host" ] && [ -n "$pbk" ] && [ -n "$sni" ] || { echo "в ссылке не хватает параметров" >&2; return 1; }
+  [[ "$port" =~ ^[0-9]+$ ]] || { echo "не удалось разобрать порт" >&2; return 1; }
+  jq -n --arg tag "$tag" --arg h "$host" --argjson p "$port" --arg id "$id" \
+    --arg sni "$sni" --arg pbk "$pbk" --arg sid "$sid" --arg fp "${fp:-chrome}" \
+    --arg path "${path:-/}" --arg mode "${mode:-auto}" '
+    {tag:$tag, protocol:"vless",
+     settings:{vnext:[{address:$h, port:$p, users:[{id:$id, encryption:"none"}]}]},
+     streamSettings:{network:"xhttp", xhttpSettings:{path:$path, mode:$mode},
+       security:"reality",
+       realitySettings:{serverName:$sni, fingerprint:$fp, publicKey:$pbk, shortId:$sid}}}'
+}
 # ---------- 1. Пакеты ----------
 say "Устанавливаю пакеты"
 export DEBIAN_FRONTEND=noninteractive
@@ -80,6 +95,18 @@ apt-get $APT_OPTS install -y -qq curl jq qrencode openssl ufw ca-certificates ip
 if ss -ltnp "sport = :$PORT" | grep -q LISTEN && ! ss -ltnp "sport = :$PORT" | grep -q xray; then
   ss -ltnp "sport = :$PORT"
   die "Порт $PORT занят другой программой (см. выше). Освободите его и запустите снова."
+fi
+
+if [ -n "$UPSTREAM" ]; then
+  UP1_JSON=$(link_outbound "$UPSTREAM" foreign1) || die "UPSTREAM: ошибка в ссылке"
+  UP_HOST=$(jq -r '.settings.vnext[0].address' <<<"$UP1_JSON"); UP_PORT=$(jq -r '.settings.vnext[0].port' <<<"$UP1_JSON")
+  UP2_HOST=""
+  if [ -n "$UPSTREAM2" ]; then
+    UP2_JSON=$(link_outbound "$UPSTREAM2" foreign2) || die "UPSTREAM2: ошибка в ссылке"
+    UP2_HOST=$(jq -r '.settings.vnext[0].address' <<<"$UP2_JSON"); UP2_PORT=$(jq -r '.settings.vnext[0].port' <<<"$UP2_JSON")
+  fi
+elif [ -n "$UPSTREAM2" ]; then
+  die "UPSTREAM2 задаётся только вместе с UPSTREAM"
 fi
 
 # ---------- 2. Xray ----------
@@ -135,30 +162,42 @@ done
 BLOCK_RULES='[
   {"type":"field","ip":["geoip:private"],"outboundTag":"block"},
   {"type":"field","protocol":["bittorrent"],"outboundTag":"block"}]'
+EXTRA_IN='[]'; BALANCERS='[]'; OBS='null'
 if [ -z "$UPSTREAM" ]; then
   OUTBOUNDS='[{"tag":"direct","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}},
               {"tag":"block","protocol":"blackhole"}]'
+  ru_rules() { echo "$BLOCK_RULES"; }
   RULES="$BLOCK_RULES"
 else
-  # Первый outbound — маршрут по умолчанию: всё, что не российское, идёт за границу
-  OUTBOUNDS=$(jq -n --arg h "$UP_HOST" --argjson p "$UP_PORT" --arg id "$UP_ID" \
-    --arg sni "$UP_SNI" --arg pbk "$UP_PBK" --arg sid "$UP_SID" --arg fp "$UP_FP" \
-    --arg path "$UP_PATH" --arg mode "$UP_MODE" '[
-    {tag:"foreign", protocol:"vless",
-     settings:{vnext:[{address:$h, port:$p, users:[{id:$id, encryption:"none"}]}]},
-     streamSettings:{network:"xhttp", xhttpSettings:{path:$path, mode:$mode},
-       security:"reality",
-       realitySettings:{serverName:$sni, fingerprint:$fp, publicKey:$pbk, shortId:$sid}}},
+  # Локальные SOCKS-входы для мониторинга (только 127.0.0.1)
+  EXTRA_IN='[
+    {"tag":"mon-tg","listen":"127.0.0.1","port":10810,"protocol":"socks","settings":{"udp":false}},
+    {"tag":"mon1","listen":"127.0.0.1","port":10811,"protocol":"socks","settings":{"udp":false}}]'
+  OUTBOUNDS=$(jq -n --argjson f1 "$UP1_JSON" '[$f1,
     {tag:"direct", protocol:"freedom", settings:{domainStrategy:"UseIPv4"}},
     {tag:"block",  protocol:"blackhole"}]')
+  DEFAULT='{"outboundTag":"foreign1"}'
+  MON_RULES='[{"type":"field","inboundTag":["mon1"],"outboundTag":"foreign1"}]'
+  if [ -n "$UPSTREAM2" ]; then
+    # Основной foreign1; если он недоступен (проверка раз в 30 с) — резерв foreign2
+    EXTRA_IN=$(jq '. + [{"tag":"mon2","listen":"127.0.0.1","port":10812,"protocol":"socks","settings":{"udp":false}}]' <<<"$EXTRA_IN")
+    OUTBOUNDS=$(jq --argjson f2 "$UP2_JSON" '.[:1] + [$f2] + .[1:]' <<<"$OUTBOUNDS")
+    BALANCERS='[{"tag":"proxy","selector":["foreign1"],"strategy":{"type":"leastPing"},"fallbackTag":"foreign2"}]'
+    OBS='{"subjectSelector":["foreign1"],"probeURL":"https://www.gstatic.com/generate_204","probeInterval":"30s","enableConcurrency":true}'
+    DEFAULT='{"balancerTag":"proxy"}'
+    MON_RULES=$(jq '. + [{"type":"field","inboundTag":["mon2"],"outboundTag":"foreign2"}]' <<<"$MON_RULES")
+  fi
   ru_rules() {  # $1 = 1 — с geosite:category-ru, 0 — без него
-    jq -n --argjson block "$BLOCK_RULES" --argjson geo "$1" '
-      $block + [
+    jq -n --argjson block "$BLOCK_RULES" --argjson mon "$MON_RULES" --argjson def "$DEFAULT" --argjson geo "$1" '
+      $block + $mon
+      + [({type:"field", inboundTag:["mon-tg"]} + $def)]
+      + [
         {type:"field", outboundTag:"direct",
          domain:((if $geo==1 then ["geosite:category-ru"] else [] end)
                  + ["regexp:\\.ru$","regexp:\\.su$","regexp:\\.xn--p1ai$"])},
         {type:"field", outboundTag:"direct", ip:["geoip:ru"]}
-      ]'
+      ]
+      + [({type:"field", network:"tcp,udp"} + $def)]'
   }
   RULES=$(ru_rules 1)
 fi
@@ -167,10 +206,11 @@ build_cfg() {
 jq -n \
   --argjson clients "$CLIENTS_JSON" \
   --arg sni "$SNI" --arg priv "$PRIV" --arg sid "$SID" --arg path "$XPATH" \
-  --argjson port "$PORT" --argjson outbounds "$OUTBOUNDS" --argjson rules "$RULES" '
+  --argjson port "$PORT" --argjson outbounds "$OUTBOUNDS" --argjson rules "$RULES" \
+  --argjson extra "$EXTRA_IN" --argjson bal "$BALANCERS" --argjson obs "$OBS" '
 {
   log: {loglevel: "warning"},
-  inbounds: [{
+  inbounds: ([{
     tag: "vless-in", listen: "0.0.0.0", port: $port, protocol: "vless",
     settings: {clients: $clients, decryption: "none"},
     streamSettings: {
@@ -183,10 +223,11 @@ jq -n \
       }
     },
     sniffing: {enabled: true, destOverride: ["http","tls","quic"], routeOnly: true}
-  }],
+  }] + $extra),
   outbounds: $outbounds,
-  routing: {domainStrategy: "IPIfNonMatch", rules: $rules}
-}' > "$NEW"
+  routing: ({domainStrategy: "IPIfNonMatch", rules: $rules}
+            + (if ($bal|length) > 0 then {balancers: $bal} else {} end))
+} + (if $obs != null then {observatory: $obs} else {} end)' > "$NEW"
 }
 [ -f "$CFG" ] && cp "$CFG" "$CFG.bak.$(date +%s)"
 build_cfg
@@ -211,6 +252,14 @@ PUB=$PUB
 SID=$SID
 XPATH=$XPATH
 EOF
+if [ -n "$UPSTREAM" ]; then
+  cat >> "$ENV_FILE" <<EOF
+UP1_HOST=$UP_HOST
+UP2_HOST=$UP2_HOST
+TG_TOKEN=$TG_TOKEN
+TG_CHAT=$TG_CHAT
+EOF
+fi
 chmod 600 "$ENV_FILE"
 
 # ---------- 7. Утилита управления vpnctl ----------
@@ -290,12 +339,99 @@ sleep 2
 systemctl is-active --quiet xray || { journalctl -u xray -n 30 --no-pager; die "Xray не запустился"; }
 
 if [ -n "$UPSTREAM" ]; then
-  say "Проверяю связь с зарубежным сервером"
-  sleep 1
-  if timeout 5 bash -c "</dev/tcp/$UP_HOST/$UP_PORT" 2>/dev/null; then
-    echo "Зарубежный сервер $UP_HOST:$UP_PORT доступен"
+  # ---------- Мониторинг и уведомления в Telegram ----------
+  cat > /usr/local/bin/vpn-monitor <<'MON'
+#!/usr/bin/env bash
+# Проверяет зарубежные серверы ИЗ РОССИИ (через этот сервер) и шлёт уведомления в Telegram.
+# vpn-monitor          — проверка (запускается таймером раз в минуту)
+# vpn-monitor status   — показать состояние сейчас
+# vpn-monitor test     — отправить тестовое сообщение
+. /usr/local/etc/xray/vpn.env
+ST=/var/lib/vpn-monitor; mkdir -p "$ST"
+probe() { [ "$(curl -s -o /dev/null -m 12 -w '%{http_code}' -x "socks5h://127.0.0.1:$1" https://www.gstatic.com/generate_204)" = "204" ]; }
+tg() {
+  [ -n "${TG_TOKEN:-}" ] && [ -n "${TG_CHAT:-}" ] || return 0
+  local via
+  for via in "socks5h://127.0.0.1:10810" ""; do
+    curl -s -m 20 ${via:+-x "$via"} "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+      --data-urlencode "chat_id=$TG_CHAT" --data-urlencode "text=$1" | grep -q '"ok":true' && return 0
+  done
+  echo "$(date '+%F %T') $1" >> "$ST/unsent.log"
+}
+NAMES=("" "VPS 1 (основной, ${UP1_HOST})" "VPS 2 (резерв, ${UP2_HOST})")
+N=1; [ -n "${UP2_HOST:-}" ] && N=2
+case "${1:-}" in
+  status) for i in $(seq 1 $N); do if probe $((10810+i)); then echo "✓ ${NAMES[$i]} доступен"; else echo "✗ ${NAMES[$i]} НЕ доступен"; fi; done; exit 0 ;;
+  test)   tg "✅ Мониторинг VPN работает ($(hostname)). Проверяю серверы из России раз в минуту."; echo "Отправлено"; exit 0 ;;
+esac
+for i in $(seq 1 $N); do
+  if probe $((10810+i)) || probe $((10810+i)); then
+    [ "$(cat "$ST/s$i" 2>/dev/null)" = down ] && {
+      echo up > "$ST/s$i"
+      if [ "$i" = 1 ] && [ "$N" = 2 ]; then tg "🟢 ${NAMES[1]} снова доступен из России. Трафик вернулся на основной сервер."
+      else tg "🟢 ${NAMES[$i]} снова доступен из России."; fi; }
+    echo 0 > "$ST/f$i"
   else
-    warn "Не могу достучаться до $UP_HOST:$UP_PORT — проверьте, что зарубежный сервер работает"
+    f=$(( $(cat "$ST/f$i" 2>/dev/null || echo 0) + 1 )); echo $f > "$ST/f$i"
+    if [ $f -eq 2 ]; then   # две неудачи подряд = не случайный сбой
+      echo down > "$ST/s$i"
+      if [ "$i" = 1 ] && [ "$N" = 2 ] && [ "$(cat "$ST/s2" 2>/dev/null)" != down ]; then
+        tg "🔴 ${NAMES[1]} недоступен из России. Трафик автоматически переключён на ${NAMES[2]}. Смените IP основного сервера."
+      elif [ "$i" = 1 ] && [ "$N" = 1 ]; then
+        tg "🔴 ${NAMES[1]} недоступен из России — VPN не работает. Смените IP сервера."
+      else
+        tg "🔴 ${NAMES[$i]} недоступен из России."
+      fi
+    fi
+  fi
+done
+if [ "$N" = 2 ] && [ "$(cat "$ST/s1" 2>/dev/null)" = down ] && [ "$(cat "$ST/s2" 2>/dev/null)" = down ] && [ ! -f "$ST/both" ]; then
+  touch "$ST/both"; tg "⛔ Оба зарубежных сервера недоступны из России. VPN не работает."
+elif [ -f "$ST/both" ] && { [ "$(cat "$ST/s1")" != down ] || [ "$(cat "$ST/s2")" != down ]; }; then rm -f "$ST/both"; fi
+MON
+  chmod 755 /usr/local/bin/vpn-monitor
+  cat > /etc/systemd/system/vpn-monitor.service <<'EOF'
+[Unit]
+Description=Проверка зарубежных VPN-серверов
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vpn-monitor
+EOF
+  cat > /etc/systemd/system/vpn-monitor.timer <<'EOF'
+[Unit]
+Description=Проверка зарубежных VPN-серверов раз в минуту
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now vpn-monitor.timer >/dev/null 2>&1
+
+  say "Проверяю зарубежные серверы (через этот сервер)"
+  sleep 3
+  vpn-monitor status || true
+
+  if [ -n "$TG_TOKEN" ] && [ -z "$TG_CHAT" ]; then
+    say "Подключаю Telegram"
+    echo "Откройте вашего бота в Telegram и отправьте ему любое сообщение (например, «привет»). Жду до 3 минут…"
+    for i in $(seq 1 36); do
+      TG_CHAT=$(curl -s -m 10 -x socks5h://127.0.0.1:10810 "https://api.telegram.org/bot$TG_TOKEN/getUpdates" \
+        | jq -r '[.result[]? | (.message // .channel_post) | .chat.id] | last // empty' 2>/dev/null || true)
+      [ -n "$TG_CHAT" ] && break
+      sleep 5
+    done
+    if [ -n "$TG_CHAT" ]; then
+      sed -i "s/^TG_CHAT=.*/TG_CHAT=$TG_CHAT/" "$ENV_FILE"
+      vpn-monitor test >/dev/null && echo "Telegram подключён — тестовое сообщение отправлено."
+    else
+      warn "Не дождался сообщения боту. Позже: отправьте боту сообщение и выполните FORCE=1 повторно, либо пропишите TG_CHAT в $ENV_FILE"
+    fi
+  elif [ -n "$TG_TOKEN" ]; then
+    vpn-monitor test >/dev/null && echo "Тестовое сообщение в Telegram отправлено."
+  else
+    echo "Уведомления в Telegram не настроены (не передан TG_TOKEN). Мониторинг работает, состояние: vpn-monitor status"
   fi
 fi
 
@@ -304,7 +440,9 @@ fi
 for n in $CLIENTS; do vpnctl link "$n" >> "$LINKS_FILE"; done
 
 say "Готово! VLESS + REALITY + XHTTP на $SERVER_IP:$PORT (маскировка: $SNI)"
-[ -n "$UPSTREAM" ] && echo "Режим промежуточного сервера: российские сайты — напрямую отсюда, остальное — через $UP_HOST"
+if [ -n "$UPSTREAM" ]; then
+  echo "Режим промежуточного сервера: российские сайты — напрямую отсюда, остальное — через $UP_HOST${UP2_HOST:+ (резерв: $UP2_HOST)}"
+fi
 vpnctl all
 cat <<EOF
 

@@ -2,7 +2,9 @@
 # =====================================================================
 #  СКРИПТ 2 — российский промежуточный сервер.
 #  Запуск — готовой строкой, которую напечатал foreign.sh:
-#     bash ru.sh 'vless://...ссылка на зарубежный сервер...'
+#     bash ru.sh 'vless://...основной...'
+#  С резервным сервером и уведомлениями в Telegram:
+#     TG_TOKEN=123:ABC bash ru.sh 'vless://...основной...' 'vless://...резерв...'
 #  Сам подбирает российский сайт для маскировки, ставит VPN и выдаёт
 #  ссылку и QR-код (одна на все устройства). Российские сайты идут напрямую
 #  отсюда, всё остальное — через зарубежный сервер.
@@ -11,8 +13,9 @@ set -euo pipefail
 REF=83fce3b962843977a8fc19484d4600cd379a179c
 BASE="https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/$REF/vpn"
 [ "$(id -u)" -eq 0 ] || { echo "Запустите от root"; exit 1; }
-UP="${1:-}"
+UP="${1:-}"; UP2="${2:-}"
 [[ "$UP" == vless://* ]] || { echo "Нужна ссылка на зарубежный сервер: bash ru.sh 'vless://...'"; exit 1; }
+[ -z "$UP2" ] || [[ "$UP2" == vless://* ]] || { echo "Вторая ссылка (резерв) должна начинаться с vless://"; exit 1; }
 
 if [ -f /usr/local/etc/xray/vpn.env ] && [ "${FORCE:-0}" != "1" ]; then
   echo "VPN здесь уже установлен. Ссылки:"; vpnctl all; exit 0
@@ -29,4 +32,4 @@ if [ -z "$SNI" ]; then
   [ -n "$SNI" ] && echo "Сайт: $SNI" || echo "Не нашёл подходящий — возьму стандартный"
 fi
 
-UPSTREAM="$UP" SNI="$SNI" CLIENTS="${CLIENTS:-VPN_Amsterdam}" FORCE=1 bash /root/vpn-setup.sh
+UPSTREAM="$UP" UPSTREAM2="$UP2" TG_TOKEN="${TG_TOKEN:-}" SNI="$SNI" CLIENTS="${CLIENTS:-VPN_Amsterdam}" FORCE=1 bash /root/vpn-setup.sh
