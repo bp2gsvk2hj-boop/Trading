@@ -212,6 +212,10 @@ else
     DEFAULT='{"balancerTag":"proxy"}'
     MON_RULES=$(jq '. + [{"type":"field","inboundTag":["mon2"],"outboundTag":"foreign2"}]' <<<"$MON_RULES")
   fi
+  # WireGuard-вход для Keenetic (создаётся keenetic.sh) сохраняется при перенастройке
+  if [ -f "$XRAY_DIR/wg.json" ]; then
+    EXTRA_IN=$(jq --slurpfile w "$XRAY_DIR/wg.json" '. + $w' <<<"$EXTRA_IN")
+  fi
   ru_rules() {  # $1 = 1 — с geosite:category-ru, 0 — без него
     jq -n --argjson block "$BLOCK_RULES" --argjson mon "$MON_RULES" --argjson def "$DEFAULT" --argjson geo "$1" '
       $block + $mon
@@ -353,6 +357,7 @@ SSH_PORT=$(echo "${SSH_CONNECTION:-}" | awk '{print $4}')
 SSH_PORT=${SSH_PORT:-22}
 ufw allow "$SSH_PORT/tcp" >/dev/null
 ufw allow "$PORT/tcp" >/dev/null
+[ -f "$XRAY_DIR/wg.json" ] && ufw allow "$(jq -r .port "$XRAY_DIR/wg.json")/udp" >/dev/null
 ufw --force enable >/dev/null
 echo "Открыты порты: SSH $SSH_PORT/tcp, VPN $PORT/tcp"
 
