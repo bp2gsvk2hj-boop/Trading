@@ -65,8 +65,8 @@ open(sys.argv[1] + '.k', 'wb').write(z.read(n))
 PY
     mv "$T.k" "$T"
   fi
-  echo "(если копия делалась без пароля — просто нажмите Enter)"
-  ask_pass once
+  if grep -q "БЕЗ пароля" "$T"; then export BKPASS=""
+  else echo "(если копия делалась без пароля — просто нажмите Enter)"; ask_pass once; fi
   sed -i '/^#/d' "$T"
   if [ -z "$BKPASS" ]; then
     base64 -d "$T" 2>/dev/null | tar -xzf - -C / || die "Не распаковалось: копия зашифрована (нужен пароль) или текст повреждён"
