@@ -4,12 +4,12 @@
 #
 #  Сделать копию (на работающем сервере):
 #     bash backup.sh               (NOPASS=1 bash backup.sh — без пароля)
-#  → спросит пароль и пришлёт вашему Telegram-боту ОДИН архив vpn-backup-*.zip:
-#    ключи (зашифрованы), все скрипты и инструкция; в подписи — команда восстановления.
+#  → спросит пароль и пришлёт вашему Telegram-боту одним сообщением 4 файла:
+#    keys (ключи, зашифрованы), scripts.zip, ВОССТАНОВЛЕНИЕ.txt и команда.txt.
 #
 #  Восстановить (на новом/переустановленном Ubuntu):
 #     TG_TOKEN='токен_бота' bash backup.sh restore FILE_ID   — скачать из Telegram
-#     bash backup.sh restore /root/vpn-backup-….zip           — архив уже на сервере
+#     bash backup.sh restore /root/keys-….txt                 — файл ключей уже на сервере
 #     bash backup.sh restore                                  — вставить текст keys.txt вручную
 #  → расшифрует, вернёт ключи на место и переустановит VPN с прежними ключами:
 #    ссылки в приложениях и настройки роутера менять не придётся.
@@ -100,51 +100,56 @@ FILES=("${DIR#/}")
 enc() { if [ -n "$BKPASS" ]; then openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BKPASS; else cat; fi; }
 DATA=$(tar -czf - -C / --exclude='*.bak*' --exclude='config.new.json' "${FILES[@]}" | enc | base64 -w 76)
 GET="curl -fsSL https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/vpn/backup.sh -o backup.sh"
-W=$(mktemp -d); mkdir -p "$W/vpn-backup/scripts"
+W=$(mktemp -d); D=$(date +%Y%m%d); B="$W/vpn-backup-$D"; mkdir -p "$B/scripts"
+# 1) ключи
+K="$W/keys-$D.txt"
 { echo "# Ключи VPN ($(hostname), $(date +%d.%m.%Y)). $([ -n "$BKPASS" ] && echo 'Зашифрованы паролем.' || echo 'БЕЗ пароля!')"
-  echo "$DATA"; } > "$W/vpn-backup/keys.txt"
+  echo "$DATA"; } > "$K"
+# 2) скрипты
 for f in backup.sh vpn-doctor.sh vpn-setup.sh ru.sh foreign.sh sni-pick.sh sni-change.sh keenetic.sh; do
-  [ -f "/root/$f" ] && cp "/root/$f" "$W/vpn-backup/scripts/"
+  [ -f "/root/$f" ] && cp "/root/$f" "$B/scripts/"
 done
-[ -f "$0" ] && cp "$0" "$W/vpn-backup/scripts/backup.sh" 2>/dev/null || true
-mkrestore() {  # $1 — команда восстановления из Telegram (или пусто)
-cat > "$W/vpn-backup/ВОССТАНОВЛЕНИЕ.txt" <<TXT
+[ -f "$0" ] && cp "$0" "$B/scripts/backup.sh" 2>/dev/null || true
+S="$W/scripts-$D.zip"; ( cd "$B" && python3 -m zipfile -c "$S" scripts/ )
+# 3) инструкция
+I="$W/ВОССТАНОВЛЕНИЕ-$D.txt"
+cat > "$I" <<TXT
 Резервная копия VPN — сервер $(hostname), $(date +%d.%m.%Y)
-$([ -n "$BKPASS" ] && echo "Ключи зашифрованы паролем — он нужен при восстановлении." || echo "Ключи НЕ зашифрованы: не пересылайте этот архив.")
+$([ -n "$BKPASS" ] && echo "Ключи зашифрованы паролем — он нужен при восстановлении." || echo "Ключи НЕ зашифрованы: не пересылайте эти файлы.")
 
-Что внутри:
-  keys.txt   — ключи VPN, WireGuard для роутера, токен бота, настройки
-  scripts/   — все скрипты VPN на момент копии
+Файлы:
+  keys-$D.txt          — ключи VPN, WireGuard для роутера, токен бота, настройки
+  scripts-$D.zip       — все скрипты VPN на момент копии
+  команда-$D.txt       — готовая команда восстановления
 
-Восстановление на новом сервере Ubuntu (под root, sudo -i), одной строкой:
-${1:-  (команда с FILE_ID — в подписи к сообщению с архивом в Telegram)}
+Восстановление на новом сервере Ubuntu (под root, sudo -i):
+  1. Открыть команда-$D.txt, скопировать строку, вместо ТОКЕН_БОТА вставить токен бота
+     (@BotFather → /mybots → ваш бот → API Token), выполнить.
+  2. Ввести пароль копии.
+  Скрипт вернёт ключи и переустановит VPN с прежними ключами: ссылки в
+  приложениях и настройки Keenetic менять не придётся. Если IP сервера
+  изменился — скрипт подскажет, что поправить.
+  3. Проверка: bash vpn-doctor.sh
 
 Если Telegram с сервера недоступен:
   $GET && bash backup.sh restore
-  и вставить содержимое keys.txt, затем Ctrl+D.
-
-Скрипт вернёт ключи и переустановит VPN с прежними ключами: ссылки в
-приложениях и настройки Keenetic менять не придётся. Если IP сервера
-изменился — скрипт подскажет, что поправить.
-Проверка после восстановления: bash vpn-doctor.sh
+  и вставить всё содержимое keys-$D.txt, затем Ctrl+D.
 TXT
-( cd "$W" && rm -f "$F" && python3 -m zipfile -c "$F" vpn-backup/ )
-}
-F="/root/vpn-backup-$(hostname)-$(date +%Y%m%d).zip"
-mkrestore ""; chmod 600 "$F"
-say "Архив: $F ($(wc -c <"$F") байт, ключи $([ -n "$BKPASS" ] && echo зашифрованы || echo БЕЗ пароля))"
+cp "$K" "/root/keys-$D.txt"; chmod 600 "/root/keys-$D.txt"
+say "Копия готова: ключи $([ -n "$BKPASS" ] && echo зашифрованы || echo БЕЗ пароля) (/root/keys-$D.txt)"
 
 if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
-  R=$(tg sendDocument -F "chat_id=$TG_CHAT" -F "document=@$F" -F "caption=Резервная копия VPN") || die "Не удалось отправить в Telegram. Архив лежит в $F"
+  # ключи загружаем первыми — чтобы узнать их file_id для команды восстановления
+  R=$(tg sendDocument -F "chat_id=$TG_CHAT" -F "document=@$K" -F "disable_notification=true") || die "Не удалось отправить в Telegram. Ключи лежат в /root/keys-$D.txt"
   FID=$(jq -r .result.document.file_id <<<"$R"); MID=$(jq -r .result.message_id <<<"$R")
-  CMD="$GET && TG_TOKEN='ТОКЕН_БОТА' bash backup.sh restore $FID"
-  CAP="Резервная копия VPN $(date +%d.%m.%Y): ключи, скрипты и инструкция в одном архиве. $([ -n "$BKPASS" ] && echo 'Пароль — только у вас.' || echo 'БЕЗ пароля: не пересылайте.')
-
-Восстановление на новом Ubuntu (под root), подставив токен бота:
-$CMD"
-  tg editMessageCaption --data-urlencode "chat_id=$TG_CHAT" --data-urlencode "message_id=$MID" --data-urlencode "caption=$CAP" >/dev/null \
-    || tg sendMessage --data-urlencode "chat_id=$TG_CHAT" --data-urlencode "text=$CAP" >/dev/null || true
-  say "Отправлено в Telegram: архив и команда восстановления — в одном сообщении."
+  C="$W/команда-$D.txt"
+  printf '%s\n' "$GET && TG_TOKEN='ТОКЕН_БОТА' bash backup.sh restore $FID" > "$C"
+  MEDIA=$(jq -nc --arg k "$FID" --arg cap "Резервная копия VPN $(date +%d.%m.%Y). $([ -n "$BKPASS" ] && echo 'Пароль — только у вас.' || echo 'БЕЗ пароля: не пересылайте.')" \
+    '[{type:"document",media:$k},{type:"document",media:"attach://s"},{type:"document",media:"attach://i"},{type:"document",media:"attach://c",caption:$cap}]')
+  tg sendMediaGroup -F "chat_id=$TG_CHAT" -F "media=$MEDIA" -F "s=@$S" -F "i=@$I" -F "c=@$C" >/dev/null \
+    || die "Не удалось отправить файлы в Telegram. Ключи лежат в /root/keys-$D.txt"
+  tg deleteMessage --data-urlencode "chat_id=$TG_CHAT" --data-urlencode "message_id=$MID" >/dev/null || true
+  say "Отправлено в Telegram одним сообщением: ключи, скрипты, инструкция и команда восстановления (4 файла)."
 else
   echo "Telegram не настроен — скопируйте содержимое файла вручную: cat $F"
 fi
