@@ -3,7 +3,7 @@
 #  Резервная копия ключей и настроек VPN (российский relay).
 #
 #  Сделать копию (на работающем сервере):
-#     bash backup.sh
+#     bash backup.sh               (NOPASS=1 bash backup.sh — без пароля)
 #  → спросит пароль, зашифрует /usr/local/etc/xray и /root/keenetic.conf
 #    и пришлёт файл vpn-backup-*.txt вашему Telegram-боту.
 #
@@ -53,9 +53,14 @@ if [ "${1:-}" = restore ]; then
     echo "Вставьте содержимое файла vpn-backup-*.txt и нажмите Enter, затем Ctrl+D:"
     cat > "$T"
   fi
+  echo "(если копия делалась без пароля — просто нажмите Enter)"
   ask_pass once
-  base64 -d "$T" 2>/dev/null | openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BKPASS 2>/dev/null \
-    | tar -xzf - -C / || die "Не расшифровалось: неверный пароль или повреждённый текст"
+  if [ -z "$BKPASS" ]; then
+    base64 -d "$T" 2>/dev/null | tar -xzf - -C / || die "Не распаковалось: копия зашифрована (нужен пароль) или текст повреждён"
+  else
+    base64 -d "$T" 2>/dev/null | openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BKPASS 2>/dev/null \
+      | tar -xzf - -C / || die "Не расшифровалось: неверный пароль или повреждённый текст"
+  fi
   rm -f "$T"
   say "Ключи восстановлены в $DIR"
   L(){ jq -r --arg t "$1" '.outbounds[]|select(.tag==$t)|.settings.vnext[0] as $v|.streamSettings as $s|"vless://\($v.users[0].id)@\($v.address):\($v.port)?encryption=none&security=reality&sni=\($s.realitySettings.serverName)&fp=\($s.realitySettings.fingerprint)&pbk=\($s.realitySettings.publicKey)&sid=\($s.realitySettings.shortId)&type=xhttp&path=\($s.xhttpSettings.path|@uri)&mode=\($s.xhttpSettings.mode)#relay"' "$DIR/config.json"; }
@@ -77,17 +82,17 @@ fi
 . "$DIR/vpn.env"
 TG_TOKEN="${TG_TOKEN:-}"; TG_CHAT="${TG_CHAT:-}"
 F="/root/vpn-backup-$(hostname)-$(date +%Y%m%d).txt"
-ask_pass
+if [ "${NOPASS:-0}" = 1 ]; then BKPASS=""; else ask_pass; fi
 FILES=("${DIR#/}")
 [ -f /root/keenetic.conf ] && FILES+=(root/keenetic.conf)
-tar -czf - -C / --exclude='*.bak*' --exclude='config.new.json' "${FILES[@]}" \
-  | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BKPASS | base64 -w 76 > "$F"
+enc() { if [ -n "$BKPASS" ]; then openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BKPASS; else cat; fi; }
+tar -czf - -C / --exclude='*.bak*' --exclude='config.new.json' "${FILES[@]}" | enc | base64 -w 76 > "$F"
 chmod 600 "$F"
-say "Копия: $F ($(wc -c <"$F") байт, зашифрована)"
+say "Копия: $F ($(wc -c <"$F") байт, $([ -n "$BKPASS" ] && echo зашифрована || echo БЕЗ пароля))"
 
 if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
   R=$(tg sendDocument -F "chat_id=$TG_CHAT" -F "document=@$F" \
-      -F "caption=Резервная копия VPN $(date +%d.%m.%Y). Пароль — только у вас.") || die "Не удалось отправить в Telegram. Файл лежит в $F"
+      -F "caption=Резервная копия VPN $(date +%d.%m.%Y). $([ -n "$BKPASS" ] && echo "Пароль — только у вас." || echo "БЕЗ пароля: не пересылайте этот файл.")") || die "Не удалось отправить в Telegram. Файл лежит в $F"
   FID=$(jq -r .result.document.file_id <<<"$R")
   tg sendMessage --data-urlencode "chat_id=$TG_CHAT" --data-urlencode "text=Восстановление на новом сервере (под root):
 curl -fsSL https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/vpn/backup.sh -o backup.sh && TG_TOKEN='ТОКЕН_БОТА' bash backup.sh restore $FID" >/dev/null || true
