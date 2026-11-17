@@ -220,10 +220,13 @@ else
     jq -n --argjson block "$BLOCK_RULES" --argjson mon "$MON_RULES" --argjson def "$DEFAULT" --argjson geo "$1" '
       $block + $mon
       + [({type:"field", inboundTag:["mon-tg"]} + $def)]
+      # QUIC (UDP/443) блокируем: клиенты сразу уходят на TCP, сайты открываются быстрее
+      + [{type:"field", network:"udp", port:"443", outboundTag:"block"}]
       + [
         {type:"field", outboundTag:"direct",
-         domain:((if $geo==1 then ["geosite:category-ru"] else [] end)
-                 + ["regexp:\\.ru$","regexp:\\.su$","regexp:\\.xn--p1ai$"])},
+         domain:((if $geo==1 then ["geosite:category-ru","geosite:yandex"] else [] end)
+                 + ["regexp:\\.ru$","regexp:\\.su$","regexp:\\.xn--p1ai$",
+                    "domain:yandex.net","domain:yastatic.net"])},
         {type:"field", outboundTag:"direct", ip:["geoip:ru"]}
       ]
       + [({type:"field", network:"tcp,udp"} + $def)]'
