@@ -120,11 +120,10 @@ $([ -n "$BKPASS" ] && echo "Ключи зашифрованы паролем —
 Файлы:
   keys-$D.txt          — ключи VPN, WireGuard для роутера, токен бота, настройки
   scripts-$D.zip       — все скрипты VPN на момент копии
-  команда-$D.txt       — готовая команда восстановления
+  команда-$D.txt       — готовая команда восстановления (содержит токен бота — не пересылайте)
 
 Восстановление на новом сервере Ubuntu (под root, sudo -i):
-  1. Открыть команда-$D.txt, скопировать строку, вместо ТОКЕН_БОТА вставить токен бота
-     (@BotFather → /mybots → ваш бот → API Token), выполнить.
+  1. Открыть команда-$D.txt, скопировать строку целиком и выполнить.
   2. Ввести пароль копии.
   Скрипт вернёт ключи и переустановит VPN с прежними ключами: ссылки в
   приложениях и настройки Keenetic менять не придётся. Если IP сервера
@@ -143,7 +142,7 @@ if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
   R=$(tg sendDocument -F "chat_id=$TG_CHAT" -F "document=@$K" -F "disable_notification=true") || die "Не удалось отправить в Telegram. Ключи лежат в /root/keys-$D.txt"
   FID=$(jq -r .result.document.file_id <<<"$R"); MID=$(jq -r .result.message_id <<<"$R")
   C="$W/команда-$D.txt"
-  printf '%s\n' "$GET && TG_TOKEN='ТОКЕН_БОТА' bash backup.sh restore $FID" > "$C"
+  printf '%s\n' "$GET && TG_TOKEN='$TG_TOKEN' bash backup.sh restore $FID" > "$C"
   MEDIA=$(jq -nc --arg k "$FID" --arg cap "Резервная копия VPN $(date +%d.%m.%Y). $([ -n "$BKPASS" ] && echo 'Пароль — только у вас.' || echo 'БЕЗ пароля: не пересылайте.')" \
     '[{type:"document",media:$k},{type:"document",media:"attach://s"},{type:"document",media:"attach://i"},{type:"document",media:"attach://c",caption:$cap}]')
   tg sendMediaGroup -F "chat_id=$TG_CHAT" -F "media=$MEDIA" -F "s=@$S" -F "i=@$I" -F "c=@$C" >/dev/null \
