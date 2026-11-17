@@ -55,6 +55,7 @@ if [ "${1:-}" = restore ]; then
   fi
   echo "(если копия делалась без пароля — просто нажмите Enter)"
   ask_pass once
+  sed -i '/^#/d' "$T"
   if [ -z "$BKPASS" ]; then
     base64 -d "$T" 2>/dev/null | tar -xzf - -C / || die "Не распаковалось: копия зашифрована (нужен пароль) или текст повреждён"
   else
@@ -86,17 +87,26 @@ if [ "${NOPASS:-0}" = 1 ]; then BKPASS=""; else ask_pass; fi
 FILES=("${DIR#/}")
 [ -f /root/keenetic.conf ] && FILES+=(root/keenetic.conf)
 enc() { if [ -n "$BKPASS" ]; then openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BKPASS; else cat; fi; }
-tar -czf - -C / --exclude='*.bak*' --exclude='config.new.json' "${FILES[@]}" | enc | base64 -w 76 > "$F"
-chmod 600 "$F"
+DATA=$(tar -czf - -C / --exclude='*.bak*' --exclude='config.new.json' "${FILES[@]}" | enc | base64 -w 76)
+GET="curl -fsSL https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/vpn/backup.sh -o backup.sh"
+{ echo "# Резервная копия VPN ($(hostname), $(date +%d.%m.%Y)). $([ -n "$BKPASS" ] && echo 'Зашифрована паролем.' || echo 'БЕЗ пароля!')"
+  echo "# Восстановление на новом Ubuntu под root:"
+  echo "#  • из Telegram — команда в подписи к сообщению с этим файлом (подставить токен бота);"
+  echo "#  • вручную — $GET && bash backup.sh restore   и вставить ВЕСЬ этот файл, затем Ctrl+D"
+  echo "$DATA"; } > "$F"; chmod 600 "$F"
 say "Копия: $F ($(wc -c <"$F") байт, $([ -n "$BKPASS" ] && echo зашифрована || echo БЕЗ пароля))"
 
 if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
-  R=$(tg sendDocument -F "chat_id=$TG_CHAT" -F "document=@$F" \
-      -F "caption=Резервная копия VPN $(date +%d.%m.%Y). $([ -n "$BKPASS" ] && echo "Пароль — только у вас." || echo "БЕЗ пароля: не пересылайте этот файл.")") || die "Не удалось отправить в Telegram. Файл лежит в $F"
-  FID=$(jq -r .result.document.file_id <<<"$R")
-  tg sendMessage --data-urlencode "chat_id=$TG_CHAT" --data-urlencode "text=Восстановление на новом сервере (под root):
-curl -fsSL https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/vpn/backup.sh -o backup.sh && TG_TOKEN='ТОКЕН_БОТА' bash backup.sh restore $FID" >/dev/null || true
-  say "Отправлено в Telegram. Сохраните файл в «Файлы» на iPad и запомните пароль."
+  R=$(tg sendDocument -F "chat_id=$TG_CHAT" -F "document=@$F" -F "caption=Резервная копия VPN") || die "Не удалось отправить в Telegram. Файл лежит в $F"
+  FID=$(jq -r .result.document.file_id <<<"$R"); MID=$(jq -r .result.message_id <<<"$R")
+  CMD="$GET && TG_TOKEN='ТОКЕН_БОТА' bash backup.sh restore $FID"
+  CAP="Резервная копия VPN $(date +%d.%m.%Y). $([ -n "$BKPASS" ] && echo 'Пароль — только у вас.' || echo 'БЕЗ пароля: не пересылайте.')
+
+Восстановление на новом Ubuntu (под root), подставив токен бота:
+$CMD"
+  tg editMessageCaption --data-urlencode "chat_id=$TG_CHAT" --data-urlencode "message_id=$MID" --data-urlencode "caption=$CAP" >/dev/null \
+    || tg sendMessage --data-urlencode "chat_id=$TG_CHAT" --data-urlencode "text=$CAP" >/dev/null || true
+  say "Отправлено в Telegram: файл и команда восстановления — в одном сообщении."
 else
   echo "Telegram не настроен — скопируйте содержимое файла вручную: cat $F"
 fi
