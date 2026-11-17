@@ -12,7 +12,7 @@
 #  отсюда, всё остальное — через зарубежный сервер.
 # =====================================================================
 set -euo pipefail
-REF=224e476717affb5acd52566fa474d016fb208465
+REF=018336823d604234bda7d6a054b0b59b01a5fed0
 BASE="https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/$REF/vpn"
 [ "$(id -u)" -eq 0 ] || { echo "Запустите от root"; exit 1; }
 UP="${1:-}"; UP2="${2:-}"
