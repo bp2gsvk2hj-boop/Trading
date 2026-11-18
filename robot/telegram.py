@@ -16,6 +16,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -229,17 +231,17 @@ def portfolio_lines(cfg) -> list[str]:
 
 def send(token: str, chat_id: str, text: str) -> None:
     params = {"chat_id": chat_id, "text": text, "disable_web_page_preview": "true"}
-    # On the VPN server Telegram may be blocked directly: try its local SOCKS exit first
-    # (TELEGRAM_PROXY=socks5h://127.0.0.1:10810; urllib has no SOCKS, so curl), then direct.
-    proxy = os.environ.get("TELEGRAM_PROXY")
-    if proxy:
-        import subprocess
-        cmd = ["curl", "-s", "-m", "20", "-x", proxy, f"https://api.telegram.org/bot{token}/sendMessage"]
-        for k, v in params.items():
-            cmd += ["--data-urlencode", f"{k}={v}"]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if '"ok":true' in r.stdout:
-            return
+    # On the VPN server Telegram may be blocked directly: try the VPN's local SOCKS exits first
+    # (TELEGRAM_PROXY, else 127.0.0.1:10810/10811; urllib has no SOCKS, so curl), then direct.
+    proxies = [p for p in (os.environ.get("TELEGRAM_PROXY") or "").split(",") if p] or \
+        ["socks5h://127.0.0.1:10810", "socks5h://127.0.0.1:10811"]
+    if shutil.which("curl"):
+        for proxy in proxies:
+            cmd = ["curl", "-s", "-m", "20", "-x", proxy, f"https://api.telegram.org/bot{token}/sendMessage"]
+            for k, v in params.items():
+                cmd += ["--data-urlencode", f"{k}={v}"]
+            if '"ok":true' in subprocess.run(cmd, capture_output=True, text=True).stdout:
+                return
     data = urllib.parse.urlencode(params).encode()
     req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
     with urllib.request.urlopen(req, timeout=20) as r:
