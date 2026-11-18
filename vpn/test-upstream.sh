@@ -37,7 +37,7 @@ link_outbound() {
 
 OUTS='[]'; NAMES=()
 add() { OUTS=$(jq --argjson o "$1" '. + [$o]' <<<"$OUTS"); NAMES+=("$2"); }
-for t in foreign1 foreign2; do
+for t in $([ "${ONLY:-0}" = 1 ] || echo foreign1 foreign2); do
   o=$(jq -c --arg t "$t" '.outbounds[]|select(.tag==$t)' "$CFG" 2>/dev/null)
   [ -n "$o" ] && add "$(jq -c --arg n "t${#NAMES[@]}" '.tag=$n' <<<"$o")" \
     "$([ $t = foreign1 ] && echo 'Текущий основной' || echo 'Текущий резерв') ($(jq -r '.settings.vnext[0].address' <<<"$o"))"
