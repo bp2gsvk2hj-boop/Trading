@@ -79,7 +79,24 @@ for try in 1 2 3; do
   echo "Telegram не принял токен бота. Возьмите его в @BotFather: /mybots → бот → API Token."
   TGT=""
 done
-TGC=$(ask "Telegram chat_id (ваш Id из @userinfobot)" "$TGC" | tr -d "[:space:]\"'")
+# chat_id: check that the bot can write there; otherwise take it from the last message to the bot.
+tgsend() { curl -s -m 20 ${TGP:+-x "$TGP"} "https://api.telegram.org/bot$TGT/sendMessage" \
+  --data-urlencode "chat_id=$1" --data-urlencode "text=Торговый робот: проверка связи" | grep -q '"ok":true'; }
+TGC=$(printf '%s' "$TGC" | tr -d "[:space:]\"'")
+if [ -n "$TGT" ] && ! { [ -n "$TGC" ] && tgsend "$TGC"; }; then
+  for try in 1 2 3; do
+    read -rp "Откройте бота в Telegram, нажмите «Старт» или напишите ему любое сообщение, затем нажмите Enter здесь " _ </dev/tty
+    TGC=$(curl -s -m 20 ${TGP:+-x "$TGP"} "https://api.telegram.org/bot$TGT/getUpdates" | python3 -c '
+import json, sys
+r = json.load(sys.stdin).get("result", [])
+ids = [(u.get("message") or u.get("my_chat_member") or {}).get("chat", {}).get("id") for u in r]
+ids = [i for i in ids if i]
+print(ids[-1] if ids else "")' 2>/dev/null || true)
+    [ -n "$TGC" ] && tgsend "$TGC" && { echo "chat_id найден: $TGC"; break; }
+    echo "Бот пока не видит ваших сообщений."
+    TGC=""
+  done
+fi
 [ -n "$TINV" ] || { echo "Без токена T-Invest робот работать не может"; exit 1; }
 umask 077
 cat > "$ENVF" <<EOT
