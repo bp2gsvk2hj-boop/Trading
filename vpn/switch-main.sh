@@ -11,7 +11,7 @@ set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "Запустите от root (sudo -i)"; exit 1; }
 NEW="${1:?Укажите ссылку нового основного сервера}"; RSNI="${2:-}"
 CFG=/usr/local/etc/xray/config.json
-B=https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/vpn
+B=https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/dec58d9908ae4ec4f3360049b1c276e1cb298234/vpn
 say() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 cd /root
 for f in ru.sh test-upstream.sh vpn-doctor.sh backup.sh; do curl -fsSL "$B/$f" -o "$f"; done
