@@ -1,14 +1,8 @@
 name: Trading robot (Тбанк)
 
 on:
-  schedule:
-    # Every 15 min on weekdays, 10:02-18:47 Moscow time (UTC+3), shortly after each 15m/1h bar
-    # closes. GitHub may start runs late.
-    - cron: "2-59/15 7-15 * * 1-5"
-    # LQDT rebalance only (it trades until 23:50 MSK): fallback if the 18:47 pass is late or
-    # skipped, so the day's margin loan is repaid before the day ends (no carry fee).
-    - cron: "35 16 * * 1-5"    # 19:35 MSK
-    - cron: "35 19 * * 1-5"    # 22:35 MSK
+  # Scheduled passes run on the own server now (server/install.sh, systemd timers).
+  # GitHub keeps manual runs only.
   workflow_dispatch:
     inputs:
       command:
