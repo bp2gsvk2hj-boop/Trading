@@ -105,7 +105,7 @@ def main():
     k = {"1h": 1, "15m": 4, "5m": 12, "1m": 60}[interval]     # bars per hour
     cfg = load()
     c = Engine(cfg, read_only=True).c
-    print("Net of costs, bp of one leg's notional. Base: z=3, window 120h. delay 1 = fill one hour after the signal.")
+    print("Net of costs, bp of one leg's notional. Base: z=3, window 120h. delay 1 = fill one bar after the signal.")
     print(f"{'pair':16} {'basis':>6} {'cost':>5} | {'d=0 n':>5} {'net':>6} | {'d=1 n':>5} {'net':>6} {'/trade':>6} "
           f"{'1st half':>8} {'2nd half':>8} | grid d=1 >0")
     for perp, asset, prefix in PAIRS:
