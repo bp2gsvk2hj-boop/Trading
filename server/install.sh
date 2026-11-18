@@ -9,8 +9,6 @@
 #  Повторный запуск обновляет установку; токены можно оставить прежними (Enter).
 #  Проверка без торговли:  systemctl start trading-robot@check; journalctl -u trading-robot@check -n 30
 #  Логи:                   journalctl -u trading-robot@pass -n 100
-#  Сторож: проверка на healthchecks.io, расписание 2-59/15 10-18 * * 1-5 (Europe/Moscow), допуск 30 мин;
-#  её Ping URL установщик спросит (можно пропустить)
 #  Остановить робота:      systemctl disable --now trading-robot-pass.timer trading-robot-collateral.timer
 # =====================================================================
 set -euo pipefail
@@ -101,25 +99,11 @@ print(ids[-1] if ids else "")' 2>/dev/null || true)
 fi
 [ -n "$TINV" ] || { echo "Без токена T-Invest робот работать не может"; exit 1; }
 umask 077
-# Watchdog: a check on healthchecks.io (cron "2-59/15 10-18 * * 1-5", Europe/Moscow, grace 30 min)
-say "Сторож (healthchecks.io), необязательно"
-HC=$(old HC_PING_URL)
-if [ -n "$HC" ]; then hint="Enter — оставить прежний"; else hint="Enter — без сторожа"; fi
-read -rp "Ping URL проверки, вида https://hc-ping.com/… ($hint): " v </dev/tty
-HC=$(printf '%s' "${v:-$HC}" | tr -d '[:space:]"'"'"'')
-if [ -n "$HC" ]; then
-  [[ "$HC" == https://* ]] || { echo "Нужна ссылка, начинающаяся с https://"; HC=""; }
-fi
-if [ -n "$HC" ]; then
-  curl -fsS -m 15 -o /dev/null "$HC/0" || curl -fsS -m 15 -x socks5h://127.0.0.1:10810 -o /dev/null "$HC/0" \
-    && echo "Сторож отвечает" || echo "[warn] healthchecks.io не ответил — проверьте ссылку"
-fi
 cat > "$ENVF" <<EOT
 TINVEST_TOKEN=$TINV
 TELEGRAM_BOT_TOKEN=$TGT
 TELEGRAM_CHAT_ID=$TGC
 TELEGRAM_PROXY=$TGP
-HC_PING_URL=$HC
 ROBOT_LIVE=yes
 PYTHON=$PY
 EOT

@@ -2,7 +2,7 @@
 # One robot pass on the server, the same steps as .github/workflows/robot.yml.
 #   pass.sh pass        trading pass (systemd timer every 15 min, 10:02-18:47 MSK)
 #   pass.sh collateral  LQDT rebalance only (18:45 MSK; fallbacks 19:35 and 22:35)
-#   pass.sh check       read-only: broker status + Telegram test message (+ watchdog ping)
+#   pass.sh check       read-only: broker status + Telegram test message
 # Secrets come from /etc/trading-robot.env (systemd EnvironmentFile).
 set -uo pipefail
 MODE="${1:-pass}"
@@ -29,12 +29,4 @@ if [ "$MODE" = pass ] && [ "$(TZ=Europe/Moscow date +%H%M)" -ge 1845 ]; then
   args+=(--summary)
 fi
 $PY -m robot.telegram "${args[@]}" || echo "[warn] telegram notification failed"
-
-# Watchdog (healthchecks.io): every trading pass reports its exit code. If pings stop
-# (server down, timers stopped) or a pass fails, healthchecks.io alerts in Telegram.
-if [ "$MODE" = pass ] && [ -n "${HC_PING_URL:-}" ]; then
-  for via in "" "socks5h://127.0.0.1:10810"; do
-    curl -fsS -m 15 --retry 2 ${via:+-x "$via"} -o /dev/null "$HC_PING_URL/$rc" && break
-  done || echo "[warn] watchdog ping failed"
-fi
 exit "$rc"
