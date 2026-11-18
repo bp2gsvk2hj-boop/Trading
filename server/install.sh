@@ -67,10 +67,19 @@ done
 # Telegram: the robot's previous settings, else the VPN monitor's bot on this server.
 TGT=$(old TELEGRAM_BOT_TOKEN); TGC=$(old TELEGRAM_CHAT_ID)
 [ -n "$TGT" ] || { TGT=$(vpn TG_TOKEN); TGC=$(vpn TG_CHAT); }
-TGT=$(ask "Токен Telegram-бота робота" "$TGT")
-TGC=$(ask "Telegram chat_id" "$TGC")
 # The VPN's local SOCKS exit to Telegram (127.0.0.1:10810), if there is one.
 TGP=""; ss -ltn 'sport = :10810' | grep -q LISTEN && TGP=socks5h://127.0.0.1:10810
+TGT=$(printf '%s' "$TGT" | tr -d "\"' ")
+# Ask until Telegram accepts the bot token (getMe); an empty answer skips notifications.
+for try in 1 2 3; do
+  TGT=$(ask "Токен Telegram-бота (от @BotFather, вида 123456:ABC...)" "$TGT" | tr -d "[:space:]\"'")
+  [ -n "$TGT" ] || { echo "Без Telegram: робот будет торговать без уведомлений"; break; }
+  curl -s -m 20 ${TGP:+-x "$TGP"} "https://api.telegram.org/bot$TGT/getMe" | grep -q '"ok":true' \
+    && { echo "Токен Telegram подошёл"; break; }
+  echo "Telegram не принял токен бота. Возьмите его в @BotFather: /mybots → бот → API Token."
+  TGT=""
+done
+TGC=$(ask "Telegram chat_id (ваш Id из @userinfobot)" "$TGC" | tr -d "[:space:]\"'")
 [ -n "$TINV" ] || { echo "Без токена T-Invest робот работать не может"; exit 1; }
 umask 077
 cat > "$ENVF" <<EOT
