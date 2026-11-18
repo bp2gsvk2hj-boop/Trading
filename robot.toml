@@ -28,7 +28,7 @@ cash_max = 0.04
 haircut = 0.40
 # Fund trades only from 5 min before the end of the main session (18:50) until 23:40 MSK: within
 # the day cash may stay below GO for free (no carry fee if covered by the day's end), so opposite
-# trades net out. Fallback passes at 19:35 and 22:35 MSK cover a late or skipped 18:47 pass.
+# trades net out. A separate rebalance runs at 18:45 MSK; fallbacks at 19:35 and 22:35 cover a missed one.
 rebalance_from = "18:45"
 rebalance_to = "23:40"
 flat_min_trade = 1000        # no futures open: everything into LQDT, if more than this is idle

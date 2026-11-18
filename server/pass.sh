@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # One robot pass on the server, the same steps as .github/workflows/robot.yml.
 #   pass.sh pass        trading pass (systemd timer every 15 min, 10:02-18:47 MSK)
-#   pass.sh collateral  evening LQDT rebalance only (19:35 and 22:35 MSK)
+#   pass.sh collateral  LQDT rebalance only (18:45 MSK; fallbacks 19:35 and 22:35)
 #   pass.sh check       read-only: broker status + Telegram test message
 # Secrets come from /etc/trading-robot.env (systemd EnvironmentFile).
 set -uo pipefail
 MODE="${1:-pass}"
 cd "$(dirname "$0")/.."
+# One pass at a time: the 18:45 rebalance and the 18:47 trading pass must not overlap.
+exec 9>/tmp/trading-robot.lock
+flock 9
 git pull -q --ff-only origin main || echo "[warn] git pull failed, running the current code"
 
 [ "$MODE" = check ] && exec server/check.sh

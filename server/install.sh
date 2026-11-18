@@ -5,7 +5,7 @@
 #     curl -fsSL https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/server/install.sh | sudo bash
 #  Спросит токены (T-Invest, Telegram-бот, chat_id) и поставит таймеры:
 #   - проход каждые 15 минут по будням 10:02–18:47 МСК;
-#   - ребаланс LQDT в 19:35 и 22:35 МСК.
+#   - ребаланс LQDT в 18:45 МСК (запасные 19:35 и 22:35).
 #  Повторный запуск обновляет установку; токены можно оставить прежними (Enter).
 #  Проверка без торговли:  systemctl start trading-robot@check; journalctl -u trading-robot@check -n 30
 #  Логи:                   journalctl -u trading-robot@pass -n 100
@@ -138,9 +138,10 @@ WantedBy=timers.target
 EOT
 cat > /etc/systemd/system/trading-robot-collateral.timer <<'EOT'
 [Unit]
-Description=Торговый робот: ребаланс LQDT (будни 19:35 и 22:35 МСК)
+Description=Торговый робот: ребаланс LQDT (будни 18:45, запасные 19:35 и 22:35 МСК)
 
 [Timer]
+OnCalendar=Mon..Fri *-*-* 18:45:00 Europe/Moscow
 OnCalendar=Mon..Fri *-*-* 19,22:35:00 Europe/Moscow
 Unit=trading-robot@collateral.service
 AccuracySec=10s
