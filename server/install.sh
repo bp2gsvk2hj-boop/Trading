@@ -49,7 +49,21 @@ ask() {  # ask "prompt" default: hidden input, Enter keeps the default
   read -rsp "$1${2:+ (Enter — оставить прежний)}: " val </dev/tty; echo >&2
   printf '%s' "${val:-$2}"
 }
-TINV=$(ask "Токен T-Invest (с правом торговли)" "$(old TINVEST_TOKEN)")
+# Ask until the broker accepts the token (a pasted token often carries a space or a line break).
+tcheck() {
+  curl -s -o /dev/null -w '%{http_code}' -m 20 --cacert "$DIR/certs/russian_trusted_ca.pem" \
+    -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d '{}' \
+    https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.UsersService/GetAccounts
+}
+TINV=$(old TINVEST_TOKEN)
+for try in 1 2 3; do
+  TINV=$(ask "Токен T-Invest (с правом торговли)" "$TINV" | tr -d '[:space:]')
+  code=$(tcheck "$TINV")
+  [ "$code" = 200 ] && { echo "Токен T-Invest подошёл"; break; }
+  echo "Брокер не принял токен (HTTP $code, длина ${#TINV} символов). Скопируйте его целиком и вставьте ещё раз."
+  TINV=""
+  [ "$try" = 3 ] && { echo "Робот НЕ включён"; exit 1; }
+done
 # Telegram: the robot's previous settings, else the VPN monitor's bot on this server.
 TGT=$(old TELEGRAM_BOT_TOKEN); TGC=$(old TELEGRAM_CHAT_ID)
 [ -n "$TGT" ] || { TGT=$(vpn TG_TOKEN); TGC=$(vpn TG_CHAT); }
