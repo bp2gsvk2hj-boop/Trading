@@ -104,12 +104,12 @@ if [ $ROLE = relay ]; then
     if [ "$FIX" = 1 ]; then jq '.routing.rules=[{"type":"field","network":"udp","port":"443","outboundTag":"block"}]+.routing.rules' "$CFG" > "$NEWC" \
       && xtest "$NEWC" && cp "$CFG" "$CFG.bak" && mv "$NEWC" "$CFG" && systemctl restart xray && fixd "добавил блокировку QUIC"; fi; }
   jq -e '[.routing.rules[]|select(.outboundTag=="direct")|.domain[]?]|any(.=="domain:yandex.net")' "$CFG" >/dev/null && ok "Яндекс/Кинопоиск идут напрямую" || bad "Нет прямого правила для Яндекса (переустановить: bash ru.sh … по команде из backup/инструкции)"
-  jq -e '.balancers[0].fallbackTag' "$CFG" >/dev/null 2>&1 && ok "Резерв настроен (fallback)" || log "· резервного сервера нет"
+  jq -e '.routing.balancers[0].fallbackTag' "$CFG" >/dev/null 2>&1 && ok "Резерв настроен (fallback)" || log "· резервного сервера нет"
   r=$(curl -s -o /dev/null -m 8 -w '%{http_code}' https://ya.ru); [ "$r" != 000 ] && ok "Российские сайты с сервера открываются" || bad "Российские сайты с сервера не открываются"
   hdr "Мониторинг"
   systemctl is-active --quiet vpn-monitor.timer && ok "Таймер проверки (раз в 15 мин) работает" || { bad "Таймер мониторинга выключен"; [ "$FIX" = 1 ] && systemctl enable --now vpn-monitor.timer >/dev/null 2>&1 && fixd "включил таймер"; }
   [ -n "${TG_TOKEN:-}" ] && [ -n "${TG_CHAT:-}" ] && ok "Telegram-бот настроен" || bad "Telegram-бот не настроен"
-  [ -s /var/lib/vpn-monitor/unsent.log ] && log "· неотправленные уведомления: $(wc -l < /var/lib/vpn-monitor/unsent.log)"
+  [ -s /var/lib/vpn-monitor/unsent.log ] && log "· неотправленные уведомления: $(wc -l < /var/lib/vpn-monitor/unsent.log), последнее: $(tail -1 /var/lib/vpn-monitor/unsent.log | cut -c1-19)"
 fi
 
 # ---------- Итог ----------
