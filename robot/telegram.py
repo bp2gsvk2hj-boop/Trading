@@ -235,17 +235,23 @@ def send(token: str, chat_id: str, text: str) -> None:
     # (TELEGRAM_PROXY, else 127.0.0.1:10810/10811; urllib has no SOCKS, so curl), then direct.
     proxies = [p for p in (os.environ.get("TELEGRAM_PROXY") or "").split(",") if p] or \
         ["socks5h://127.0.0.1:10810", "socks5h://127.0.0.1:10811"]
+    tried = []
     if shutil.which("curl"):
         for proxy in proxies:
-            cmd = ["curl", "-s", "-m", "20", "-x", proxy, f"https://api.telegram.org/bot{token}/sendMessage"]
+            cmd = ["curl", "-sS", "-m", "20", "-x", proxy, f"https://api.telegram.org/bot{token}/sendMessage"]
             for k, v in params.items():
                 cmd += ["--data-urlencode", f"{k}={v}"]
-            if '"ok":true' in subprocess.run(cmd, capture_output=True, text=True).stdout:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if '"ok":true' in r.stdout:
                 return
+            tried.append(f"{proxy}: {(r.stdout or r.stderr).strip()[:200]}")
     data = urllib.parse.urlencode(params).encode()
     req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
-    with urllib.request.urlopen(req, timeout=20) as r:
-        r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            r.read()
+    except OSError as e:
+        raise RuntimeError("; ".join(tried + [f"direct: {e}"])) from None
 
 
 def main(argv: list[str] | None = None) -> int:
