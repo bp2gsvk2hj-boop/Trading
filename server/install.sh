@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # =====================================================================
 #  Торговый робот Тбанк на своём сервере (Ubuntu 22.04/24.04, Яндекс Облако).
-#  Запуск от root:
-#     curl -fsSL https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/server/install.sh -o install.sh
-#     sudo bash install.sh
+#  Одна команда на сервере:
+#     curl -fsSL https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/server/install.sh | sudo bash
 #  Спросит токены (T-Invest, Telegram-бот, chat_id) и поставит таймеры:
 #   - проход каждые 15 минут по будням 10:02–18:47 МСК;
 #   - ребаланс LQDT в 19:35 и 22:35 МСК.
@@ -18,10 +17,13 @@ DIR=/opt/trading
 ENVF=/etc/trading-robot.env
 REPO=https://github.com/bp2gsvk2hj-boop/Trading.git
 say() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
+# Everything in a function: with `curl … | bash` the whole script is read before apt-get or git
+# can swallow the rest of it from stdin.
+main() {
 
 say "Пакеты (git, Python 3.11+)"
 apt-get update -qq
-apt-get install -y -qq git python3 ca-certificates >/dev/null
+apt-get install -y -qq git python3 curl ca-certificates >/dev/null
 PY=python3
 if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
   apt-get install -y -qq python3.11 >/dev/null
@@ -39,21 +41,29 @@ else
 fi
 
 say "Токены (хранятся в $ENVF, доступ только root)"
-old() { [ -f "$ENVF" ] && sed -n "s/^$1=//p" "$ENVF" || true; }
-ask() {  # ask NAME "prompt": hidden input, Enter keeps the old value
-  local cur val; cur=$(old "$1")
-  read -rsp "$2${cur:+ (Enter — оставить прежний)}: " val </dev/tty; echo
-  printf '%s' "${val:-$cur}"
+VPNENV=/usr/local/etc/xray/vpn.env
+old() { { [ -f "$ENVF" ] && sed -n "s/^$1=//p" "$ENVF"; } || true; }
+vpn() { { [ -f "$VPNENV" ] && sed -n "s/^$1=//p" "$VPNENV"; } || true; }
+ask() {  # ask "prompt" default: hidden input, Enter keeps the default
+  local val
+  read -rsp "$1${2:+ (Enter — оставить прежний)}: " val </dev/tty; echo >&2
+  printf '%s' "${val:-$2}"
 }
-TINV=$(ask TINVEST_TOKEN "Токен T-Invest (с правом торговли)")
-TGT=$(ask TELEGRAM_BOT_TOKEN "Токен Telegram-бота")
-TGC=$(ask TELEGRAM_CHAT_ID "Telegram chat_id")
+TINV=$(ask "Токен T-Invest (с правом торговли)" "$(old TINVEST_TOKEN)")
+# Telegram: the robot's previous settings, else the VPN monitor's bot on this server.
+TGT=$(old TELEGRAM_BOT_TOKEN); TGC=$(old TELEGRAM_CHAT_ID)
+[ -n "$TGT" ] || { TGT=$(vpn TG_TOKEN); TGC=$(vpn TG_CHAT); }
+TGT=$(ask "Токен Telegram-бота робота" "$TGT")
+TGC=$(ask "Telegram chat_id" "$TGC")
+# The VPN's local SOCKS exit to Telegram (127.0.0.1:10810), if there is one.
+TGP=""; ss -ltn 'sport = :10810' | grep -q LISTEN && TGP=socks5h://127.0.0.1:10810
 [ -n "$TINV" ] || { echo "Без токена T-Invest робот работать не может"; exit 1; }
 umask 077
 cat > "$ENVF" <<EOT
 TINVEST_TOKEN=$TINV
 TELEGRAM_BOT_TOKEN=$TGT
 TELEGRAM_CHAT_ID=$TGC
+TELEGRAM_PROXY=$TGP
 ROBOT_LIVE=yes
 PYTHON=$PY
 EOT
@@ -110,3 +120,5 @@ else
   journalctl -u trading-robot@check -n 30 --no-pager -o cat
   echo "Проверка не прошла — робот НЕ включён. Исправьте ошибку выше и запустите install.sh ещё раз."
 fi
+}
+main "$@"
