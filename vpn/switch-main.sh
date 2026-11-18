@@ -12,6 +12,10 @@ set -euo pipefail
 NEW="${1:?Укажите ссылку нового основного сервера}"; RSNI="${2:-}"
 CFG=/usr/local/etc/xray/config.json
 B=https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/dec58d9908ae4ec4f3360049b1c276e1cb298234/vpn
+# Если SSH оборвётся при перезапуске VPN — скрипт доработает до конца, вывод сохранится в журнал
+LOG=/root/switch-main.log
+if [ -z "${SWITCH_BG:-}" ]; then trap '' HUP; exec > >(tee --output-error=warn -a "$LOG") 2>&1; fi
+echo "=== $(date '+%d.%m.%Y %H:%M') ==="
 say() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 cd /root
 for f in ru.sh test-upstream.sh vpn-doctor.sh backup.sh; do curl -fsSL "$B/$f" -o "$f"; done
@@ -21,8 +25,8 @@ A2=$(jq -r '.outbounds[]|select(.tag=="foreign2")|.settings.vnext[0] as $v|.stre
 [ -n "$RSNI" ] && A2=$(sed "s/sni=[^&]*/sni=$RSNI/" <<<"$A2")
 
 say "1/4 Проверяю новый основной и резерв до переключения"
-OUT=$(ONLY=1 bash test-upstream.sh "$NEW" "$A2" 2>&1); echo "$OUT"
-if grep -q "НЕ работает\|НЕДОСТУПЕН" <<<"$OUT"; then
+OUT=$(ONLY=1 bash test-upstream.sh "$NEW" "$A2" 2>&1 || true); echo "$OUT"
+if grep -q "НЕ работает\|НЕДОСТУПЕН\|не принят\|ссылк" <<<"$OUT" || ! grep -q "успешно" <<<"$OUT"; then
   echo; echo "✗ Один из серверов не работает с новыми настройками — НИЧЕГО НЕ МЕНЯЮ."
   echo "  Проверьте, что сайт маскировки сменён на зарубежных серверах, и запустите снова."; exit 1
 fi
@@ -37,4 +41,4 @@ FIX=0 bash vpn-doctor.sh || true
 
 say "4/4 Резервная копия в Telegram"
 NOPASS=1 bash backup.sh || echo "Копию сделать не удалось — запустите позже: NOPASS=1 bash backup.sh"
-say "Готово. На телефоне ifconfig.me должен показать IP нового основного сервера."
+say "Готово (журнал: $LOG). На телефоне ifconfig.me должен показать IP нового основного сервера."
