@@ -8,7 +8,7 @@
 set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "Запустите от root"; exit 1; }
 B=https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/vpn
-TEST=https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/b4f4b773f7191532932ec8fa3f93f5f6afcc76cc/vpn/test-upstream.sh
+TEST=https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/ff9373601b0d42b6ab5063fd1d4e839a8c0f72f9/vpn/test-upstream.sh
 say() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 cd /root
 
