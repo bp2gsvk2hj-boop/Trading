@@ -570,7 +570,7 @@ WRITE_FORMAT = """
          "why": "..." (только у пунктов "main")}
 Ключи разделов: %s.
 Правила:
-- Всего не больше %d пунктов вместе с "main"; "main" — 1–2 самых важных события.
+- Всего не больше %d пунктов вместе с "main"; "main" — 1–3 самых важных события.
   Если важного мало — выпуск короче. Слабые материалы просто не включай.
 - КАЖДОЕ событие — РОВНО ОДИН пункт во всём выпуске: событие из "main" не повторяй в разделах;
   одно событие из разных источников — один пункт, все номера в "src".
@@ -633,7 +633,7 @@ def ask_llm(net: Net, cfg: dict, user: str) -> dict | None:
     """Этап 2: выпуск из отобранных материалов."""
     secs = sections(cfg)
     fmt = WRITE_FORMAT % (", ".join(f'"{k}" ({v})' for k, v in secs.items()),
-                          int(cfg.get("digest", {}).get("max_points", 7)))
+                          int(cfg.get("digest", {}).get("max_points", 10)))
     return chat_json(net, cfg, policy(cfg) + fmt, user)
 
 
@@ -668,7 +668,7 @@ def render(cfg: dict, data: dict, items: list[dict]) -> str:
     """JSON модели -> Telegram HTML. Дубли отсекаются ещё раз: пункт, все источники которого
     уже были в выпуске, — повтор того же события. Лимит пунктов соблюдается и здесь."""
     used: set[int] = set()
-    limit = int(cfg.get("digest", {}).get("max_points", 7))
+    limit = int(cfg.get("digest", {}).get("max_points", 10))
     count = 0
     blocks = []
     has_kind = False
