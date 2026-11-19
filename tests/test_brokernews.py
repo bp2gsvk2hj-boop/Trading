@@ -57,6 +57,19 @@ class Parsing(unittest.TestCase):
         _, items = m.parse_feed(ATOM.encode())
         self.assertEqual(items[0]["link"], "https://ex.ru/2")
 
+    def test_yandex_search_xml(self):
+        xml = """<?xml version="1.0" encoding="utf-8"?><yandexsearch version="1.0"><response><results>
+<grouping><group><doc><url>https://www.kommersant.ru/doc/1</url><domain>www.kommersant.ru</domain>
+<title><hlword>СберИнвестиции</hlword> запустили автоследование</title><modtime>20261119T101500</modtime>
+<passages><passage>Сервис стал доступен <hlword>клиентам</hlword></passage></passages></doc></group></grouping>
+</results></response></yandexsearch>"""
+        items = m.parse_yandex_xml(xml.encode())
+        self.assertEqual(items[0]["title"], "СберИнвестиции запустили автоследование")
+        self.assertEqual(items[0]["summary"], "Сервис стал доступен клиентам")
+        self.assertEqual(items[0]["date"], datetime(2026, 11, 19, 7, 15, tzinfo=timezone.utc))
+        with self.assertRaises(RuntimeError):
+            m.parse_yandex_xml(b"<yandexsearch><response><error code='32'>limit</error></response></yandexsearch>")
+
     def test_broken_feed_is_repaired(self):
         bad = RSS.replace("<title>Google Новости</title>", "<title>Банки.ру & Co\x01</title>")
         title, items = m.parse_feed(bad.encode())
@@ -89,10 +102,10 @@ class Filtering(unittest.TestCase):
 
     def test_config_keywords(self):
         mt = m.Matcher(self.cfg)
-        self.assertEqual(mt.match("СберИнвестиции запустили сервис"), ["Сбер"])
+        self.assertEqual(mt.match("СберИнвестиции запустили сервис"), ["СберИнвестиции"])
         self.assertEqual(mt.match("Сбербанк повысил ставки по сбережениям"), [])
-        self.assertIn("Конкуренты", mt.match("Брокер Т-Инвестиции привлёк клиентов"))
-        self.assertEqual(mt.match("Минфин о реформе ИИС-3"), ["Рынок и регулирование"])
+        self.assertIn("Брокеры", mt.match("Брокер Т-Инвестиции привлёк клиентов"))
+        self.assertEqual(mt.match("Минфин о реформе ИИС-3"), ["Регулирование"])
         self.assertEqual(mt.match("Батон подорожал"), [])
         self.assertEqual(mt.match("Криптобиржа и брокер"), [])
 
@@ -116,24 +129,26 @@ class Render(unittest.TestCase):
         data = {"main": [{"text": "Сбер выпустил дисконтные облигации", "src": [1, 2]}],
                 "sections": {"sber": [{"text": "То же событие ещё раз", "src": [2]},
                                       {"text": "Посев: <b>СберИнвестиции</b>", "src": [3, 99]}],
-                             "market": [{"text": "ЦБ о брокерах", "src": [4]}],
+                             "regulation": [{"text": "ЦБ о брокерах", "src": [4]}],
                              "unknown": [{"text": "чужой раздел", "src": [5]}]}}
         out = m.render(m.load_config(), data, self.items)
         self.assertEqual(out.count("Сбер выпустил"), 1)
         self.assertNotIn("То же событие", out)                    # all its sources were already used
         self.assertIn("<b>🔥 ГЛАВНОЕ</b>", out)
-        self.assertIn("<b>🟢 СБЕР</b>", out)
+        self.assertIn("<b>🟢 СБЕРИНВЕСТИЦИИ</b>", out)
+        self.assertIn("\nСбер выпустил", out)                     # no stray space without a title
         self.assertIn(m.RULE, out)
         self.assertIn("&lt;b&gt;СберИнвестиции", out)              # model text is escaped
         self.assertIn('<a href="https://t.me/c/1">Канал 1</a>', out)
         self.assertNotIn("99", out)
         self.assertNotIn("чужой раздел", out)
-        self.assertLess(out.index("СБЕР"), out.index("РЫНОК"))
+        self.assertIn("РЕГУЛИРОВАНИЕ", m.render(m.load_config(), {"sections": {"regulation": [
+            {"title": "ЦБ о брокерах", "text": "x", "src": [4]}]}}, self.items))
 
     def test_bond_keywords_across_lines(self):
         mt = m.Matcher(m.load_config())
-        self.assertEqual(mt.match("Сбер разместил дисконтные\nоблигации"), ["Сбер"])
-        self.assertEqual(mt.match("СФО СБ Секьюритизация 7: рейтинг ruAAA.sf"), ["Сбер"])
+        self.assertEqual(mt.match("Сбер разместил дисконтные\nоблигации"), ["СберИнвестиции"])
+        self.assertEqual(mt.match("СФО СБ Секьюритизация 7: рейтинг ruAAA.sf"), ["СберИнвестиции"])
 
 
 class Cases(unittest.TestCase):
@@ -154,22 +169,44 @@ class Cases(unittest.TestCase):
 class Marks(unittest.TestCase):
     items = Render.items
 
-    def test_kind_level_why(self):
-        data = {"main": [{"text": "ЦБ разрешил X", "src": [1], "kind": "official", "why": "Новый продукт"}],
-                "sections": {"sber": [{"text": "Посев: дисконтные облигации", "src": [2], "kind": "ad"}],
-                             "reputation": [{"text": "Сбой приложения", "src": [3], "level": "mass"}],
-                             "telegram": [{"text": "Автор ждёт снижения", "src": [4], "kind": "opinion",
-                                           "why": "не для этого раздела"}]}}
+    def test_titles_kinds_why_and_limit(self):
+        data = {"main": [{"title": "ЦБ разрешил X.", "text": "Подробности", "src": [1], "kind": "official",
+                          "why": "Новый продукт"}],
+                "sections": {"sber": [{"title": "Дисконтные облигации", "text": "в 4 каналах", "src": [2],
+                                       "kind": "ad"}],
+                             "brokers": [{"title": "Брокер Y", "text": "мнение", "src": [3], "kind": "opinion",
+                                          "why": "не для раздела"}]}}
         out = m.render(m.load_config(), data, self.items)
-        self.assertIn("• 🏛 ЦБ разрешил X", out)
-        self.assertIn("↳ <i>Для Сбера (оценка): Новый продукт</i>", out)
-        self.assertIn("📣 Посев: дисконтные облигации", out)
-        self.assertNotIn("Посев: Посев", out)
-        self.assertIn("<b>[массовая проблема]</b> Сбой", out)
-        self.assertIn("💬 Автор", out)
-        self.assertNotIn("не для этого раздела", out)
-        self.assertIn("🏛 официально", out)                      # legend
-        self.assertLess(out.index("РЕПУТАЦИЯ"), out.index("ЧТО ОБСУЖДАЮТ"))
+        self.assertIn("🏛 <b>ЦБ разрешил X</b>\nПодробности\n→ <a", out)
+        self.assertIn("<i>Для Сбера: Новый продукт</i>", out)
+        self.assertIn("📣 <b>Дисконтные облигации</b>", out)
+        self.assertNotIn("не для раздела", out)
+        self.assertIn("🏛 официальное сообщение", out)                     # legend
+        cfg = m.load_config()
+        cfg["digest"]["max_points"] = 2
+        self.assertNotIn("Брокер Y", m.render(cfg, data, self.items))     # point limit
+
+
+class Editor(unittest.TestCase):
+    def test_two_stages_and_empty_issue(self):
+        items = [dict(text=f"материал {i}", url=f"https://x/{i}", source="СМИ", groups=["Брокеры"],
+                      date=NOW, kind="СМИ") for i in range(1, 5)]
+        calls = []
+
+        def fake(net, cfg, system, user):
+            calls.append(system)
+            if "отбор" in system:
+                return {"keep": [2, 4]}
+            self.assertIn("[2] ", user)                                  # only 2 chosen materials
+            self.assertNotIn("материал 1", user)
+            return {"main": [{"title": "Главное", "text": "t", "src": [1]}]}
+
+        with unittest.mock.patch.object(m, "chat_json", fake):
+            _, body = m.build_digest(None, m.load_config(), items, NOW, NOW)
+        self.assertEqual(len(calls), 2)
+        self.assertIn('href="https://x/2"', body)                       # numbering of the chosen list
+        with unittest.mock.patch.object(m, "chat_json", lambda *a: {"keep": []}):
+            self.assertEqual(m.build_digest(None, m.load_config(), items, NOW, NOW)[1], "")
 
 
 class HealthTest(unittest.TestCase):
@@ -241,7 +278,7 @@ class Run(unittest.TestCase):
                     unittest.mock.patch.object(m.time, "sleep", lambda s: None), \
                     unittest.mock.patch.dict(os.environ, env):
                 m.cmd_run(24, False, Path(d) / "web")
-                digests = [p for p in net.sent if "Брокерский рынок" in p["text"]]
+                digests = [p for p in net.sent if "Брокерский бизнес" in p["text"]]
                 alerts = [p for p in net.sent if "служебное" in p["text"]]
                 self.assertEqual(len(digests), 1)
                 self.assertIn("СберИнвестиции", digests[0]["text"])
@@ -250,7 +287,7 @@ class Run(unittest.TestCase):
                 self.assertIn("не читаются", alerts[0]["text"])
                 self.assertTrue((Path(d) / "web" / "data.json").exists())
                 m.cmd_run(24, False, None)       # nothing new: no digest, only "2 runs in a row" per channel
-                self.assertEqual(len([p for p in net.sent if "Брокерский рынок" in p["text"]]), 1)
+                self.assertEqual(len([p for p in net.sent if "Брокерский бизнес" in p["text"]]), 1)
                 self.assertEqual(len(net.sent), 3)
                 self.assertIn("@frank_media: не загружается 2", net.sent[2]["text"])
                 self.assertNotIn("не читаются", net.sent[2]["text"])

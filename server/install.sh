@@ -119,6 +119,18 @@ else for try in 1 2 3; do
   echo "OpenAI не принял ключ (или api.openai.com недоступен через VPN)."
   OAI=""
 done; fi
+# Yandex Search API for the digest (optional): fresh Russian news instead of Google News.
+YSK=$(old YANDEX_SEARCH_API_KEY); YFD=$(old YANDEX_FOLDER_ID)
+if [ -n "$YSK" ] && [ -n "$YFD" ]; then echo "Поиск новостей: Yandex Search API (сохранён)"
+else
+  echo "Поиск новостей для дайджеста: Яндекс точнее Google Новостей для российского рынка."
+  echo "Нужен API-ключ сервисного аккаунта с ролью search-api.webSearch.user (консоль Яндекс Облака)."
+  YSK=$(ask "API-ключ Yandex Search (Enter — пропустить, искать в Google Новостях)" "" | tr -d '[:space:]')
+  if [ -n "$YSK" ]; then
+    read -rp "ID каталога Яндекс Облака (folder_id): " YFD </dev/tty
+    YFD=$(printf '%s' "$YFD" | tr -d '[:space:]')
+  fi
+fi
 # Digest recipients: a Telegram channel for colleagues (the bot posts there; anyone invited reads it),
 # else the robot chat. Trading notifications never go to the channel.
 NEWS=$(old BROKERNEWS_CHAT_IDS)
@@ -156,6 +168,8 @@ TELEGRAM_BOT_TOKEN=$TGT
 TELEGRAM_CHAT_ID=$TGC
 TELEGRAM_PROXY=$TGP
 OPENAI_API_KEY=$OAI
+YANDEX_SEARCH_API_KEY=$YSK
+YANDEX_FOLDER_ID=$YFD
 BROKERNEWS_CHAT_IDS=$NEWS
 TRADER_WEB=/var/www/trader
 ROBOT_LIVE=yes

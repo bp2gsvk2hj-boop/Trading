@@ -200,10 +200,12 @@ class Matcher:
     def __init__(self, cfg: dict):
         f = re.IGNORECASE | re.DOTALL   # .{0,80} ловит слова и на соседних строках поста
         self.groups = {g: [re.compile(p, f) for p in pats] for g, pats in (cfg.get("keywords") or {}).items()}
-        self.exclude = [re.compile(p, f) for p in cfg.get("exclude", {}).get("patterns", [])]
+        ex = cfg.get("exclude", {})
+        self.exclude = [re.compile(p, f) for p in ex.get("patterns", [])]
+        self.keep_if = re.compile(ex["keep_if"], f) if ex.get("keep_if") else None
 
     def match(self, text: str) -> list[str]:
-        if any(p.search(text) for p in self.exclude):
+        if any(p.search(text) for p in self.exclude) and not (self.keep_if and self.keep_if.search(text)):
             return []
         return [g for g, pats in self.groups.items() if any(p.search(text) for p in pats)]
 
@@ -407,14 +409,58 @@ def parse_feed(body: bytes) -> tuple[str, list[dict]]:
     return title, out
 
 
+def yandex_search_on() -> bool:
+    return bool(os.environ.get("YANDEX_SEARCH_API_KEY") and os.environ.get("YANDEX_FOLDER_ID"))
+
+
 def news_urls(cfg: dict) -> list[tuple[str, str]]:
-    """-> [(url, подпись для отчёта об источниках)]."""
+    """-> [(url, подпись для отчёта об источниках)]. Поисковые запросы идут в Google Новости,
+    только если не настроен Yandex Search API."""
     n = cfg.get("news", {})
     urls = [(u, urllib.parse.urlparse(u).netloc.removeprefix("www.")) for u in n.get("feeds", [])]
-    for q in n.get("google_news", []):
+    queries = [] if yandex_search_on() else n.get("search", []) + n.get("google_news", [])
+    for q in queries:
         urls.append(("https://news.google.com/rss/search?q=" + urllib.parse.quote_plus(q + " when:2d")
                      + "&hl=ru&gl=RU&ceid=RU:ru", f"Google Новости «{q}»"))
     return urls
+
+
+def parse_yandex_xml(xml: bytes) -> list[dict]:
+    """Ответ Yandex Search (формат XML) -> [{title, summary, link, date}]."""
+    root = xml_root(xml)
+    err = root.find(".//error")
+    if err is not None:
+        raise RuntimeError("Yandex Search: " + "".join(err.itertext()).strip()[:200])
+    out = []
+    for doc in root.iter("doc"):
+        t = doc.find("modtime")
+        try:
+            dt = datetime.strptime(t.text.strip(), "%Y%m%dT%H%M%S").replace(tzinfo=MSK) if t is not None else None
+        except ValueError:
+            dt = None
+        passages = " ".join("".join(p.itertext()) for p in doc.iter("passage"))
+        title = doc.find("title")
+        out.append(dict(title=strip_html("".join(title.itertext()) if title is not None else ""),
+                        summary=strip_html(passages), link=(doc.findtext("url") or "").strip(),
+                        date=dt, source=(doc.findtext("domain") or "").strip(), source_url=""))
+    return out
+
+
+def yandex_search(net: Net, query: str, since: datetime) -> list[dict]:
+    """Yandex Search API v2 (Яндекс Облако): свежие документы по запросу."""
+    code, r = net.post_json(
+        "https://searchapi.api.cloud.yandex.net/v2/web/search",
+        {"query": {"searchType": "SEARCH_TYPE_RU",
+                   "queryText": f"{query} date:>{since.astimezone(MSK):%Y%m%d}"},
+         "sortSpec": {"sortMode": "SORT_MODE_BY_TIME", "sortOrder": "SORT_ORDER_DESC"},
+         "groupSpec": {"groupMode": "GROUP_MODE_FLAT", "groupsOnPage": "30", "docsInGroup": "1"},
+         "maxPassages": "2", "region": "225", "l10N": "LOCALIZATION_RU",
+         "folderId": os.environ["YANDEX_FOLDER_ID"], "responseFormat": "FORMAT_XML"},
+        {"Authorization": f"Api-Key {os.environ['YANDEX_SEARCH_API_KEY']}"}, timeout=40)
+    if code != 200 or "rawData" not in r:
+        raise RuntimeError(f"HTTP {code}: {str(r.get('message') or r)[:200]}")
+    import base64
+    return parse_yandex_xml(base64.b64decode(r["rawData"]))
 
 
 def domain(url: str) -> str:
@@ -451,6 +497,31 @@ def collect_news(net, cfg, since, store, matcher, health: "Health | None" = None
                 kind = "официально" if any(d == o or d.endswith("." + o) for o in official) else "СМИ"
                 items.append(dict(key=key, source=en["source"] or feed_title[:60] or "СМИ", text=text, kind=kind,
                                   url=en["link"], date=en["date"], groups=groups))
+    if yandex_search_on():
+        for q in cfg.get("news", {}).get("search", []):
+            label = f"Яндекс «{q}»"
+            try:
+                entries = yandex_search(net, q, since)
+            except Exception as e:  # noqa: BLE001
+                log("warn", f"поиск недоступен {label}: {e}")
+                if health:
+                    health.record("ya:" + q, label, False, error=str(e))
+                continue
+            if health:
+                health.record("ya:" + q, label, True)
+            for en in entries:
+                if not en["link"] or (en["date"] and en["date"] < since):
+                    continue
+                key = "rss:" + en["link"]
+                if store.seen(key):
+                    continue
+                text = f"{en['title']}. {en['summary']}" if en["summary"] else en["title"]
+                groups = matcher.match(text)
+                if groups:
+                    d = domain(en["link"])
+                    kind = "официально" if any(d == o or d.endswith("." + o) for o in official) else "СМИ"
+                    items.append(dict(key=key, source=en["source"] or d, text=text, kind=kind, url=en["link"],
+                                      date=en["date"] or datetime.now(timezone.utc), groups=groups))
     log("info", f"Новости: {len(items)} подходящих")
     return items
 
@@ -468,39 +539,47 @@ def dedup(items: list[dict]) -> list[dict]:
 
 
 DEFAULT_SECTIONS = {
-    "sber": "🟢 СБЕР",
-    "reputation": "⚠️ РЕПУТАЦИЯ СБЕРА",
-    "competitors": "🏦 КОНКУРЕНТЫ",
-    "market": "📈 РЫНОК И РЕГУЛИРОВАНИЕ",
-    "events": "🎤 КОНФЕРЕНЦИИ И ФОРУМЫ",
-    "telegram": "👀 ЧТО ОБСУЖДАЮТ В TELEGRAM",
+    "sber": "🟢 СБЕРИНВЕСТИЦИИ",
+    "brokers": "🏦 БРОКЕРЫ",
+    "regulation": "⚖️ РЕГУЛИРОВАНИЕ",
+    "infrastructure": "📊 БИРЖИ И ИНФРАСТРУКТУРА",
+    "events": "🎤 ОТРАСЛЕВЫЕ СОБЫТИЯ",
 }
-GROUP_SECTION = {"Сбер": "sber", "Конкуренты": "competitors", "Конференции": "events"}  # остальное -> market
+# группа первичного фильтра -> раздел (для выпуска без ChatGPT)
+GROUP_SECTION = {"СберИнвестиции": "sber", "Брокеры": "brokers", "Регулирование": "regulation",
+                 "Инфраструктура": "infrastructure", "Отраслевые события": "events"}
 RULE = "━━━━━━━━━━━━━━━"
-KIND_MARK = {"official": "🏛 ", "opinion": "💬 ", "ad": "📣 Посев: ", "media": ""}
-LEVEL_MARK = {"mass": "массовая проблема", "repeated": "повторяющиеся жалобы", "single": "единичная претензия"}
-LEGEND = "<i>🏛 официально · 💬 мнение или слух · 📣 посев (реклама) · без значка — СМИ</i>"
+KIND_MARK = {"official": "🏛 ", "opinion": "💬 ", "ad": "📣 ", "media": ""}
+LEGEND = "<i>🏛 официальное сообщение · 📣 промо · 💬 мнение</i>"
 
-JSON_FORMAT = """
-Ответ — строго JSON-объект без пояснений:
+SELECT_FORMAT = """
+ЗАДАЧА: строгий редакторский отбор. Тебе дан пронумерованный список материалов-кандидатов.
+Верни номера только тех, что соответствуют редакционной политике (раздел «БЕРЁМ») и не попадают
+в «НЕ БЕРЁМ». Решай по сути материала, а не по наличию ключевых слов.
+Ответ — строго JSON: {"keep": [номера]}. Пустой список — нормальный ответ.
+"""
+
+WRITE_FORMAT = """
+ЗАДАЧА: собери выпуск канала из отобранных материалов — как профессиональный отраслевой
+журналист: коротко, по делу, с фактами и цифрами, без воды, оценок и восклицаний.
+Ответ — строго JSON:
 {"main": [пункт, ...], "sections": {"<ключ раздела>": [пункт, ...]}}
-пункт = {"text": "...", "src": [номера материалов], "kind": "official|media|opinion|ad",
-         "level": "mass|repeated|single" (только в разделе reputation),
-         "why": "..." (только у 2–3 самых важных пунктов "main")}.
+пункт = {"title": "заголовок 3–8 слов, суть новости",
+         "text": "1–2 предложения: кто, что сделал, ключевые цифры и сроки",
+         "src": [номера материалов], "kind": "official|media|ad|opinion",
+         "why": "..." (только у 1–3 пунктов "main")}
 Ключи разделов: %s.
-- "main" — 3–5 самых значимых событий. КАЖДОЕ событие встречается в ответе РОВНО ОДИН раз:
-  событие из "main" не повторяй в разделах; одно событие из разных источников — один пункт,
-  все его номера в "src" (самые информативные первыми).
-- "text" — 1–2 предложения: только факты из материалов, с цифрами. Обычный текст, без HTML,
-  Markdown и ссылок (ссылки программа добавит по номерам).
-- "kind": official — сообщение самой компании, регулятора, биржи; media — публикация СМИ;
-  opinion — мнение, оценка, слух или прогноз автора канала; ad — посев, реклама, промо.
-  Тип материала указан в списке, но решай по сути: пересказ пресс-релиза в СМИ — official,
-  колонка аналитика в СМИ — opinion.
-- "level" для reputation: mass — подтверждённый массовый сбой или проблема; repeated — несколько
-  независимых жалоб на одно и то же; single — единичная публичная претензия. Не преувеличивай масштаб.
-- "why" — одно предложение: чем событие важно для брокерского бизнеса Сбера (конкуренция,
-  продукт, регулирование, клиенты, репутация). Это оценка, а не факт; не пиши, если связь неочевидна.
+Правила:
+- Всего не больше %d пунктов вместе с "main"; "main" — 1–3 самых важных события дня.
+  Если важного мало — выпуск короче. Слабые материалы просто не включай.
+- КАЖДОЕ событие — РОВНО ОДИН пункт во всём выпуске: событие из "main" не повторяй в разделах;
+  одно событие из разных источников — один пункт, все номера в "src".
+- Только факты из материалов; оговорки («планирует», «по данным источников») сохраняй;
+  мнения — kind = opinion с указанием автора; промо СберИнвестиций — kind = ad;
+  сообщения компании, регулятора, биржи (в т.ч. пересказанные СМИ) — official.
+- "why" — одно предложение: что это значит для брокерского бизнеса Сбера. Только если связь
+  очевидна; это оценка.
+- Обычный текст без HTML, Markdown и ссылок: ссылки программа добавит по номерам.
 """
 
 
@@ -508,13 +587,16 @@ def sections(cfg: dict) -> dict:
     return cfg.get("sections") or DEFAULT_SECTIONS
 
 
-def ask_llm(net: Net, cfg: dict, user: str) -> dict | None:
+def policy(cfg: dict) -> str:
+    llm = cfg.get("llm", {})
+    return llm.get("policy") or llm.get("prompt", "")
+
+
+def chat_json(net: Net, cfg: dict, system: str, user: str) -> dict | None:
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not key:
         return None
     llm = cfg.get("llm", {})
-    secs = sections(cfg)
-    system = llm.get("prompt", "") + JSON_FORMAT % ", ".join(f'"{k}" ({v})' for k, v in secs.items())
     code, r = net.post_json(llm.get("url", "https://api.openai.com/v1/chat/completions"),
                             {"model": llm.get("model", "gpt-5-mini"),
                              "response_format": {"type": "json_object"},
@@ -526,6 +608,33 @@ def ask_llm(net: Net, cfg: dict, user: str) -> dict | None:
     text = r["choices"][0]["message"]["content"].strip()
     text = re.sub(r"^```\w*\n?|```$", "", text).strip()
     return json.loads(text)
+
+
+def material_lines(items: list[dict], max_chars: int) -> str:
+    lines = []
+    for i, it in enumerate(items, 1):
+        t = re.sub(r"\s+", " ", it["text"])[:max_chars]
+        lines.append(f"[{i}] {it['date'].astimezone(MSK):%d.%m %H:%M} | {it['source']} | "
+                     f"тип: {it.get('kind', 'СМИ')}\n{t}")
+    return "\n\n".join(lines)
+
+
+def select_items(net: Net, cfg: dict, items: list[dict]) -> list[dict] | None:
+    """Этап 1: редактор отбирает материалы по политике. None — модель недоступна."""
+    max_chars = int(cfg.get("digest", {}).get("max_chars", 600))
+    data = chat_json(net, cfg, policy(cfg) + SELECT_FORMAT, material_lines(items, max_chars))
+    if data is None:
+        return None
+    keep = {int(n) for n in data.get("keep", []) if str(n).isdigit()}
+    return [it for i, it in enumerate(items, 1) if i in keep]
+
+
+def ask_llm(net: Net, cfg: dict, user: str) -> dict | None:
+    """Этап 2: выпуск из отобранных материалов."""
+    secs = sections(cfg)
+    fmt = WRITE_FORMAT % (", ".join(f'"{k}" ({v})' for k, v in secs.items()),
+                          int(cfg.get("digest", {}).get("max_points", 12)))
+    return chat_json(net, cfg, policy(cfg) + fmt, user)
 
 
 def sort_items(cfg: dict, items: list[dict]) -> list[dict]:
@@ -557,51 +666,59 @@ def source_links(nums, items: list[dict], limit: int = 3) -> str:
 
 def render(cfg: dict, data: dict, items: list[dict]) -> str:
     """JSON модели -> Telegram HTML. Дубли отсекаются ещё раз: пункт, все источники которого
-    уже были в дайджесте, — повтор того же события."""
+    уже были в выпуске, — повтор того же события. Лимит пунктов соблюдается и здесь."""
     used: set[int] = set()
+    limit = int(cfg.get("digest", {}).get("max_points", 12))
+    count = 0
     blocks = []
+    has_kind = False
 
     def points(lst, key: str = "") -> list[str]:
+        nonlocal count, has_kind
         out = []
         for p in lst or []:
-            if not isinstance(p, dict) or not str(p.get("text", "")).strip():
+            if count >= limit:
+                break
+            if not isinstance(p, dict) or not str(p.get("text") or p.get("title") or "").strip():
                 continue
             src = {int(n) for n in p.get("src") or [] if str(n).isdigit() and 0 < int(n) <= len(items)}
             if src and src <= used:
                 continue
             used.update(src)
-            text = str(p["text"]).strip()
+            title = str(p.get("title") or "").strip().rstrip(".")
+            text = str(p.get("text") or "").strip()
             mark = KIND_MARK.get(str(p.get("kind", "")), "")
-            if mark.startswith("📣") and text.lower().startswith("посев"):
-                text = text.split(":", 1)[-1].strip() or text
-            level = LEVEL_MARK.get(str(p.get("level", ""))) if key == "reputation" else None
-            line = f"• {mark}" + (f"<b>[{level}]</b> " if level else "") + html.escape(text)
+            has_kind = has_kind or bool(mark)
+            line = f"{mark}<b>{html.escape(title)}</b>" if title else mark
+            if text:
+                line += ("\n" if title else "") + html.escape(text)
             links = source_links(p.get("src"), items)
             if links:
-                line += f" — {links}"
+                line += f"\n→ {links}"
             why = str(p.get("why") or "").strip()
             if why and key == "main":
-                line += f"\n   ↳ <i>Для Сбера (оценка): {html.escape(why)}</i>"
+                line += f"\n<i>Для Сбера: {html.escape(why)}</i>"
             out.append(line)
+            count += 1
         return out
 
     main = points(data.get("main"), "main")
     if main:
-        blocks.append(header("🔥 ГЛАВНОЕ") + "\n" + "\n\n".join(main))
+        blocks.append(header("🔥 ГЛАВНОЕ") + "\n\n" + "\n\n".join(main))
     for key, title in sections(cfg).items():
         pts = points((data.get("sections") or {}).get(key), key)
         if pts:
-            blocks.append(header(title) + "\n" + "\n\n".join(pts))
-    if blocks:
+            blocks.append(header(title) + "\n\n" + "\n\n".join(pts))
+    if blocks and has_kind:
         blocks.append(LEGEND)
     return "\n\n".join(blocks)
 
 
-def fallback_digest(items: list[dict], limit: int = 80, cfg: dict | None = None) -> str:
+def fallback_digest(items: list[dict], limit: int = 40, cfg: dict | None = None) -> str:
     secs = sections(cfg or {})
     by_sec: dict[str, list[dict]] = {}
     for it in items[:limit]:
-        by_sec.setdefault(GROUP_SECTION.get(it["groups"][0], "market"), []).append(it)
+        by_sec.setdefault(GROUP_SECTION.get(it["groups"][0], "brokers"), []).append(it)
     blocks = []
     for key, title in secs.items():
         lst = by_sec.get(key)
@@ -619,22 +736,23 @@ def fallback_digest(items: list[dict], limit: int = 80, cfg: dict | None = None)
 
 
 def build_digest(net, cfg, items, since, now) -> tuple[str, str]:
+    """-> (период, тело выпуска). Пустое тело — редактор не нашёл ничего достойного."""
     period = f"{since.astimezone(MSK):%d.%m %H:%M} – {now.astimezone(MSK):%d.%m %H:%M} МСК"
     d = cfg.get("digest", {})
-    items = sort_items(cfg, items)[:int(d.get("max_items", 150))]
-    lines = []
-    for i, it in enumerate(items, 1):
-        t = re.sub(r"\s+", " ", it["text"])[:int(d.get("max_chars", 600))]
-        lines.append(f"[{i}] {it['date'].astimezone(MSK):%d.%m %H:%M} | {it['source']} | "
-                     f"тип: {it.get('kind', 'СМИ')} | {', '.join(it['groups'])}\n{t}")
-    body = None
+    items = sort_items(cfg, items)[:int(d.get("max_items", 250))]
     try:
-        data = ask_llm(net, cfg, f"Период: {period}\n\n" + "\n\n".join(lines))
-        body = render(cfg, data, items) if data else None
+        chosen = select_items(net, cfg, items)
+        if chosen is None:
+            return period, fallback_digest(items, cfg=cfg)
+        log("info", f"редактор отобрал {len(chosen)} из {len(items)}")
+        if not chosen:
+            return period, ""
+        data = ask_llm(net, cfg, f"Период: {period}\n\n" + material_lines(chosen, int(d.get("max_chars", 600))))
+        return period, render(cfg, data, chosen) if data else fallback_digest(chosen, cfg=cfg)
     except Exception as e:  # noqa: BLE001
-        log("warn", f"сводка ChatGPT не получилась, отправляю список: {e}")
+        log("warn", f"ChatGPT не ответил, отправляю список: {e}")
         LLM_ERRORS.append(str(e)[:200])
-    return period, body or fallback_digest(items, cfg=cfg)
+        return period, fallback_digest(items, cfg=cfg)
 
 
 LLM_ERRORS: list[str] = []
@@ -777,7 +895,16 @@ def _run(store: "Store", hours: int | None, dry_run: bool, web: Path | None) -> 
         store.put("last_run", now.isoformat())
         return 0
     period, body = build_digest(net, cfg, items, since, now)
-    text = f"<b>📊 Брокерский рынок · {period}</b>\nМатериалов: {len(items)}\n\n{body}"
+    if not body.strip():
+        log("info", "редактор не нашёл значимых новостей — выпуск не отправляю")
+        if not dry_run:
+            report = health_report(*health.problems(), LLM_ERRORS)
+            if report:
+                send_owner(net, report)
+            store.mark([i["key"] for i in items] + [i["hash"] for i in items])
+            store.put("last_run", now.isoformat())
+        return 0
+    text = f"<b>💼 Брокерский бизнес · {period}</b>\n\n{body}"
     if dry_run:
         print(plain(text))
         return 0
