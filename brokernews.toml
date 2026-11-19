@@ -19,7 +19,7 @@ channels = [
   "MoscowExchangeOfficial",                                  # MOEX — Московская биржа
   "moex_derivatives|moexderivatives",                        # MOEX Derivatives
   "moex_bonds|moexbonds",                                    # MOEX Bonds
-  "naufor|naufor_official|nauforofficial|naufor_ru",         # НАУФОР
+  "naufortelegram",                                          # НАУФОР
   "cbonds|cbonds_ru|cbondsru",                               # Cbonds
   "frank_invest|frankmediainvest|frankmedia_invest|frank_media_invest",  # Frank Media Invest
   "frank_media",                                             # Frank Media
@@ -39,7 +39,7 @@ channels = [
 ]
 # Официальные каналы компаний и регуляторов — в дайджесте помечаются 🏛
 official = ["centralbank_russia", "sberinvestments", "SberInvest", "sberinvestpro", "MoscowExchangeOfficial",
-            "moex_derivatives", "moex_bonds", "naufor", "naufor_official", "cbonds", "vtbmyinvestments", "alfawealth"]
+            "moex_derivatives", "moex_bonds", "naufortelegram", "cbonds", "vtbmyinvestments", "alfawealth"]
 # Каналы, из которых брать все посты без фильтра по ключевым словам
 channels_all = []
 max_pages = 3            # страниц по ~20 постов с канала за запуск
