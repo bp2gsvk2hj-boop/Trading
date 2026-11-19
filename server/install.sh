@@ -133,6 +133,8 @@ server {
 EOT
 ln -sf /etc/nginx/sites-available/trader /etc/nginx/sites-enabled/trader
 nginx -t -q && systemctl enable -q nginx && systemctl reload-or-restart nginx
+# the VPN setup turns on ufw with only its own ports open
+if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then ufw allow 8080/tcp >/dev/null; fi
 # first data right away (also rebuilt after every robot pass)
 systemd-run --wait --quiet -p User=robot -p EnvironmentFile="$ENVF" -p WorkingDirectory="$DIR" \
   "${PY}" trader/build_data.py --out /var/www/trader/data.json \
