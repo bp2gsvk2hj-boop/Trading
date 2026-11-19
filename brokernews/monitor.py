@@ -359,9 +359,22 @@ def strip_html(s: str | None) -> str:
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", s or ""))).strip()
 
 
+def xml_root(body: bytes) -> ET.Element:
+    """Разбор XML с починкой типичных ошибок лент: голый «&», управляющие символы, мусор до <?xml."""
+    try:
+        return ET.fromstring(body)
+    except ET.ParseError:
+        text = body.decode("utf-8", errors="replace")
+        text = text[text.find("<"):] if "<" in text else text
+        text = re.sub(r"&(?!(?:[a-zA-Z][a-zA-Z0-9]*|#[0-9]+|#x[0-9a-fA-F]+);)", "&amp;", text)
+        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+        text = re.sub(r"^<\?xml[^>]*\?>", "", text.lstrip())
+        return ET.fromstring(text)
+
+
 def parse_feed(body: bytes) -> tuple[str, list[dict]]:
     """RSS 2.0 и Atom -> (название ленты, [{title, summary, link, date, source}])."""
-    root = ET.fromstring(body)
+    root = xml_root(body)
     atom = "{http://www.w3.org/2005/Atom}"
     out = []
     if root.tag == atom + "feed":

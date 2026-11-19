@@ -57,6 +57,12 @@ class Parsing(unittest.TestCase):
         _, items = m.parse_feed(ATOM.encode())
         self.assertEqual(items[0]["link"], "https://ex.ru/2")
 
+    def test_broken_feed_is_repaired(self):
+        bad = RSS.replace("<title>Google Новости</title>", "<title>Банки.ру & Co\x01</title>")
+        title, items = m.parse_feed(bad.encode())
+        self.assertEqual(title, "Банки.ру & Co")
+        self.assertEqual(len(items), 1)
+
     def test_channel_names(self):
         cfg = {"telegram": {"channels": ["@a", "https://t.me/b", "A", "x|@y"], "channels_all": ["c"]}}
         self.assertEqual(m.channel_names(cfg), [("c", True), ("a", False), ("b", False), ("x|y", False)])
