@@ -131,6 +131,65 @@ class Store:
         self.db.close()
 
 
+class Health:
+    """Контроль источников: молчащие, недоступные, пустые. Владельцу — только новые проблемы
+    и восстановления, не каждый запуск."""
+
+    def __init__(self, db: sqlite3.Connection, cfg: dict):
+        self.db = db
+        self.db.execute("""CREATE TABLE IF NOT EXISTS health (src TEXT PRIMARY KEY, label TEXT,
+            fails INTEGER DEFAULT 0, last_ok TEXT, last_post TEXT, problem TEXT DEFAULT '')""")
+        self.silence = timedelta(days=int(cfg.get("health", {}).get("silence_days", 7)))
+        self.min_fails = int(cfg.get("health", {}).get("fail_runs", 2))
+        self.run: dict[str, tuple[bool, str]] = {}
+
+    def record(self, src: str, label: str, ok: bool, last_post: datetime | None = None, error: str = "") -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        row = self.db.execute("SELECT fails, last_post FROM health WHERE src=?", (src,)).fetchone()
+        fails = 0 if ok else (row[0] if row else 0) + 1
+        lp = last_post.isoformat() if last_post else (row[1] if row else None)
+        self.db.execute("""INSERT INTO health (src, label, fails, last_ok, last_post) VALUES (?,?,?,?,?)
+            ON CONFLICT(src) DO UPDATE SET label=excluded.label, fails=excluded.fails,
+            last_ok=COALESCE(?, health.last_ok), last_post=excluded.last_post""",
+                        (src, label, fails, now if ok else None, lp, now if ok else None))
+        self.run[src] = (ok, error)
+
+    def problems(self) -> tuple[list[str], list[str]]:
+        """-> (новые проблемы, восстановившиеся). Запоминает текущее состояние."""
+        now = datetime.now(timezone.utc)
+        new, fixed = [], []
+        for src, label, fails, last_post, prev in self.db.execute(
+                "SELECT src, label, fails, last_post, problem FROM health").fetchall():
+            if src == "_tg_mass":
+                continue
+            if src not in self.run:          # источник убрали из настроек
+                self.db.execute("DELETE FROM health WHERE src=?", (src,))
+                continue
+            problem = ""
+            if fails >= self.min_fails:
+                problem = f"не загружается {fails} запуска подряд ({self.run[src][1][:80] or 'нет данных'})"
+            elif src.startswith("tg:") and last_post and now - datetime.fromisoformat(last_post) > self.silence:
+                days = (now - datetime.fromisoformat(last_post)).days
+                problem = f"молчит {days} дн."
+            if problem and not prev:
+                new.append(f"• {label}: {problem}")
+            elif prev and not problem:
+                fixed.append(f"• {label}")
+            self.db.execute("UPDATE health SET problem=? WHERE src=?", (problem, src))
+        tg = [ok for src, (ok, _) in self.run.items() if src.startswith("tg:")]
+        mass = len(tg) >= 4 and tg.count(False) >= len(tg) / 2
+        row = self.db.execute("SELECT problem FROM health WHERE src='_tg_mass'").fetchone()
+        if mass and not (row and row[0]):
+            new.insert(0, f"• Telegram: не читаются {tg.count(False)} из {len(tg)} каналов сразу — "
+                          "t.me недоступен через VPN или сменилась вёрстка страниц")
+        elif row and row[0] and not mass:
+            fixed.insert(0, "• Telegram: каналы снова читаются")
+        self.db.execute("INSERT OR REPLACE INTO health (src, label, problem) VALUES ('_tg_mass', 'Telegram', ?)",
+                        ("mass" if mass else "",))
+        self.db.commit()
+        return new, fixed
+
+
 def text_hash(text: str) -> str:
     norm = re.sub(r"\W+", "", text.lower())[:160]
     return "h:" + hashlib.md5(norm.encode()).hexdigest()
@@ -223,8 +282,9 @@ def channel_names(cfg: dict) -> list[tuple[str, bool]]:
     return out
 
 
-def collect_telegram(net, cfg, since, store, matcher) -> list[dict]:
+def collect_telegram(net, cfg, since, store, matcher, health: "Health | None" = None) -> list[dict]:
     pages_max = int(cfg.get("telegram", {}).get("max_pages", 3))
+    official = {n.lower().lstrip("@") for n in cfg.get("telegram", {}).get("official", [])}
     items, bad = [], []
     for name, take_all in channel_names(cfg):
         try:
@@ -240,9 +300,13 @@ def collect_telegram(net, cfg, since, store, matcher) -> list[dict]:
                     break
                 before = oldest["id"]
                 time.sleep(0.4)
+            if health:
+                health.record(f"tg:{name.lower()}", f"@{name}", bool(posts),
+                              max((p["date"] for p in posts), default=None), "не найден или пустая страница")
             if not posts:
                 bad.append(name)
                 continue
+            kind = "официально" if name.lower() in official else "Telegram-канал"
             for p in posts:
                 if p["date"] < since or len(p["text"]) < 20:
                     continue
@@ -251,10 +315,12 @@ def collect_telegram(net, cfg, since, store, matcher) -> list[dict]:
                     continue
                 groups = matcher.match(p["text"]) or (["Прочее"] if take_all else [])
                 if groups:
-                    items.append(dict(key=key, source=f"TG: {title or name}", text=p["text"],
+                    items.append(dict(key=key, source=f"TG: {title or name}", text=p["text"], kind=kind,
                                       url=f"https://t.me/{name}/{p['id']}", date=p["date"], groups=groups))
         except Exception as e:  # noqa: BLE001
             log("warn", f"t.me/s/{name}: {e}")
+            if health:
+                health.record(f"tg:{name.lower()}", f"@{name}", False, error=str(e))
         time.sleep(0.4)
     if bad:
         log("warn", "каналы не найдены или без веб-версии: " + ", ".join(bad))
@@ -297,30 +363,41 @@ def parse_feed(body: bytes) -> tuple[str, list[dict]]:
             dt = None
         out.append(dict(title=strip_html(e.findtext("title")), summary=strip_html(e.findtext("description")),
                         link=(e.findtext("link") or "").strip(), date=dt,
-                        source=(e.findtext("source") or "").strip()))
+                        source=(e.findtext("source") or "").strip(),
+                        source_url=(e.find("source").get("url", "") if e.find("source") is not None else "")))
     return title, out
 
 
-def news_urls(cfg: dict) -> list[str]:
+def news_urls(cfg: dict) -> list[tuple[str, str]]:
+    """-> [(url, подпись для отчёта об источниках)]."""
     n = cfg.get("news", {})
-    urls = list(n.get("feeds", []))
+    urls = [(u, urllib.parse.urlparse(u).netloc.removeprefix("www.")) for u in n.get("feeds", [])]
     for q in n.get("google_news", []):
-        urls.append("https://news.google.com/rss/search?q=" + urllib.parse.quote_plus(q + " when:2d")
-                    + "&hl=ru&gl=RU&ceid=RU:ru")
+        urls.append(("https://news.google.com/rss/search?q=" + urllib.parse.quote_plus(q + " when:2d")
+                     + "&hl=ru&gl=RU&ceid=RU:ru", f"Google Новости «{q}»"))
     return urls
 
 
-def collect_news(net, cfg, since, store, matcher) -> list[dict]:
+def domain(url: str) -> str:
+    return urllib.parse.urlparse(url or "").netloc.lower().removeprefix("www.")
+
+
+def collect_news(net, cfg, since, store, matcher, health: "Health | None" = None) -> list[dict]:
+    official = [d.lower() for d in cfg.get("news", {}).get("official_domains", [])]
     items = []
-    for url in news_urls(cfg):
+    for url, label in news_urls(cfg):
         try:
             code, body = net.get(url)
             if code != 200:
                 raise RuntimeError(f"HTTP {code}")
             feed_title, entries = parse_feed(body)
         except Exception as e:  # noqa: BLE001
-            log("warn", f"лента недоступна {url[:80]}: {e}")
+            log("warn", f"лента недоступна {label}: {e}")
+            if health:
+                health.record("rss:" + url, label, False, error=str(e))
             continue
+        if health:
+            health.record("rss:" + url, label, True)
         for en in entries:
             if not en["date"] or en["date"] < since or not en["link"]:
                 continue
@@ -331,7 +408,9 @@ def collect_news(net, cfg, since, store, matcher) -> list[dict]:
             text = f"{title}. {summary}" if summary and summary[:40] not in title else title
             groups = matcher.match(text)
             if groups:
-                items.append(dict(key=key, source=en["source"] or feed_title[:60] or "СМИ", text=text,
+                d = domain(en.get("source_url") or en["link"])
+                kind = "официально" if any(d == o or d.endswith("." + o) for o in official) else "СМИ"
+                items.append(dict(key=key, source=en["source"] or feed_title[:60] or "СМИ", text=text, kind=kind,
                                   url=en["link"], date=en["date"], groups=groups))
     log("info", f"Новости: {len(items)} подходящих")
     return items
@@ -351,22 +430,38 @@ def dedup(items: list[dict]) -> list[dict]:
 
 DEFAULT_SECTIONS = {
     "sber": "🟢 СБЕР",
+    "reputation": "⚠️ РЕПУТАЦИЯ СБЕРА",
     "competitors": "🏦 КОНКУРЕНТЫ",
     "market": "📈 РЫНОК И РЕГУЛИРОВАНИЕ",
+    "events": "🎤 КОНФЕРЕНЦИИ И ФОРУМЫ",
     "telegram": "👀 ЧТО ОБСУЖДАЮТ В TELEGRAM",
 }
-GROUP_SECTION = {"Сбер": "sber", "Конкуренты": "competitors"}   # остальное -> market
+GROUP_SECTION = {"Сбер": "sber", "Конкуренты": "competitors", "Конференции": "events"}  # остальное -> market
 RULE = "━━━━━━━━━━━━━━━"
+KIND_MARK = {"official": "🏛 ", "opinion": "💬 ", "ad": "📣 Посев: ", "media": ""}
+LEVEL_MARK = {"mass": "массовая проблема", "repeated": "повторяющиеся жалобы", "single": "единичная претензия"}
+LEGEND = "<i>🏛 официально · 💬 мнение или слух · 📣 посев (реклама) · без значка — СМИ</i>"
 
 JSON_FORMAT = """
 Ответ — строго JSON-объект без пояснений:
 {"main": [пункт, ...], "sections": {"<ключ раздела>": [пункт, ...]}}
-где пункт = {"text": "1–2 предложения с фактами и цифрами", "src": [номера материалов]}.
+пункт = {"text": "...", "src": [номера материалов], "kind": "official|media|opinion|ad",
+         "level": "mass|repeated|single" (только в разделе reputation),
+         "why": "..." (только у 2–3 самых важных пунктов "main")}.
 Ключи разделов: %s.
-"main" — 3–5 самых значимых событий. КАЖДОЕ событие встречается в ответе РОВНО ОДИН раз:
-событие из "main" не повторяй в разделах; одно событие из разных источников — один пункт,
-все его номера в "src" (самые информативные первыми). В "text" — только обычный текст,
-без HTML, Markdown и ссылок: ссылки на источники программа добавит сама по номерам.
+- "main" — 3–5 самых значимых событий. КАЖДОЕ событие встречается в ответе РОВНО ОДИН раз:
+  событие из "main" не повторяй в разделах; одно событие из разных источников — один пункт,
+  все его номера в "src" (самые информативные первыми).
+- "text" — 1–2 предложения: только факты из материалов, с цифрами. Обычный текст, без HTML,
+  Markdown и ссылок (ссылки программа добавит по номерам).
+- "kind": official — сообщение самой компании, регулятора, биржи; media — публикация СМИ;
+  opinion — мнение, оценка, слух или прогноз автора канала; ad — посев, реклама, промо.
+  Тип материала указан в списке, но решай по сути: пересказ пресс-релиза в СМИ — official,
+  колонка аналитика в СМИ — opinion.
+- "level" для reputation: mass — подтверждённый массовый сбой или проблема; repeated — несколько
+  независимых жалоб на одно и то же; single — единичная публичная претензия. Не преувеличивай масштаб.
+- "why" — одно предложение: чем событие важно для брокерского бизнеса Сбера (конкуренция,
+  продукт, регулирование, клиенты, репутация). Это оценка, а не факт; не пиши, если связь неочевидна.
 """
 
 
@@ -427,7 +522,7 @@ def render(cfg: dict, data: dict, items: list[dict]) -> str:
     used: set[int] = set()
     blocks = []
 
-    def points(lst) -> list[str]:
+    def points(lst, key: str = "") -> list[str]:
         out = []
         for p in lst or []:
             if not isinstance(p, dict) or not str(p.get("text", "")).strip():
@@ -436,17 +531,30 @@ def render(cfg: dict, data: dict, items: list[dict]) -> str:
             if src and src <= used:
                 continue
             used.update(src)
+            text = str(p["text"]).strip()
+            mark = KIND_MARK.get(str(p.get("kind", "")), "")
+            if mark.startswith("📣") and text.lower().startswith("посев"):
+                text = text.split(":", 1)[-1].strip() or text
+            level = LEVEL_MARK.get(str(p.get("level", ""))) if key == "reputation" else None
+            line = f"• {mark}" + (f"<b>[{level}]</b> " if level else "") + html.escape(text)
             links = source_links(p.get("src"), items)
-            out.append(f"• {html.escape(str(p['text']).strip())}" + (f" — {links}" if links else ""))
+            if links:
+                line += f" — {links}"
+            why = str(p.get("why") or "").strip()
+            if why and key == "main":
+                line += f"\n   ↳ <i>Для Сбера (оценка): {html.escape(why)}</i>"
+            out.append(line)
         return out
 
-    main = points(data.get("main"))
+    main = points(data.get("main"), "main")
     if main:
         blocks.append(header("🔥 ГЛАВНОЕ") + "\n" + "\n\n".join(main))
     for key, title in sections(cfg).items():
-        pts = points((data.get("sections") or {}).get(key))
+        pts = points((data.get("sections") or {}).get(key), key)
         if pts:
             blocks.append(header(title) + "\n" + "\n\n".join(pts))
+    if blocks:
+        blocks.append(LEGEND)
     return "\n\n".join(blocks)
 
 
@@ -479,14 +587,18 @@ def build_digest(net, cfg, items, since, now) -> tuple[str, str]:
     for i, it in enumerate(items, 1):
         t = re.sub(r"\s+", " ", it["text"])[:int(d.get("max_chars", 600))]
         lines.append(f"[{i}] {it['date'].astimezone(MSK):%d.%m %H:%M} | {it['source']} | "
-                     f"{', '.join(it['groups'])}\n{t}")
+                     f"тип: {it.get('kind', 'СМИ')} | {', '.join(it['groups'])}\n{t}")
     body = None
     try:
         data = ask_llm(net, cfg, f"Период: {period}\n\n" + "\n\n".join(lines))
         body = render(cfg, data, items) if data else None
     except Exception as e:  # noqa: BLE001
         log("warn", f"сводка ChatGPT не получилась, отправляю список: {e}")
+        LLM_ERRORS.append(str(e)[:200])
     return period, body or fallback_digest(items, cfg=cfg)
+
+
+LLM_ERRORS: list[str] = []
 
 
 # ---- отправка ------------------------------------------------------------------
@@ -544,6 +656,35 @@ def send_telegram(net: Net, text: str) -> None:
         raise RuntimeError("дайджест не отправлен ни одному получателю")
 
 
+def send_owner(net: Net, text: str) -> None:
+    """Служебные предупреждения — только владельцу (чат робота), не в канал коллег."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat = os.environ.get("BROKERNEWS_OWNER_CHAT") or os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not token or not chat:
+        log("warn", "предупреждение владельцу не отправлено: нет TELEGRAM_CHAT_ID")
+        return
+    try:
+        net.post_json(f"https://api.telegram.org/bot{token}/sendMessage",
+                      {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True})
+    except Exception as e:  # noqa: BLE001
+        log("warn", f"предупреждение владельцу не отправлено: {e}")
+
+
+def health_report(new: list[str], fixed: list[str], llm_errors: list[str]) -> str | None:
+    parts = []
+    if new:
+        parts.append("Проблемы с источниками:\n" + "\n".join(html.escape(x) for x in new))
+    if llm_errors:
+        parts.append("Сводка ChatGPT не получилась, дайджест ушёл списком ссылок:\n• "
+                     + html.escape(llm_errors[-1]))
+    if fixed:
+        parts.append("Снова работают:\n" + "\n".join(html.escape(x) for x in fixed))
+    if not parts:
+        return None
+    return "<b>⚠️ Дайджест рынка — служебное</b>\n\n" + "\n\n".join(parts) + \
+        "\n\n<i>Проверить каналы: python3 -m brokernews channels</i>"
+
+
 def publish_web(web: Path, entry: dict, keep: int = 90) -> None:
     """Архив дайджестов для страницы http://<сервер>:8080/news/ (рядом с «Помощником трейдера»)."""
     archive = STATE / "brokernews-digests.json"
@@ -583,11 +724,17 @@ def _run(store: "Store", hours: int | None, dry_run: bool, web: Path | None) -> 
     since = now - timedelta(hours=hours) if hours else \
         datetime.fromisoformat(last) if last else now - timedelta(hours=int(cfg.get("digest", {}).get("first_hours", 24)))
 
-    items = collect_telegram(net, cfg, since, store, matcher) + collect_news(net, cfg, since, store, matcher)
+    health = Health(store.db, cfg)
+    LLM_ERRORS.clear()
+    items = collect_telegram(net, cfg, since, store, matcher, health) + \
+        collect_news(net, cfg, since, store, matcher, health)
     items = [i for i in dedup(items) if not store.seen(i["hash"])]
     log("info", f"итого без дублей: {len(items)}")
     if not items and not dry_run:
         log("info", "ничего нового — дайджест не отправляю")
+        report = health_report(*health.problems(), [])
+        if report:
+            send_owner(net, report)
         store.put("last_run", now.isoformat())
         return 0
     period, body = build_digest(net, cfg, items, since, now)
@@ -596,6 +743,9 @@ def _run(store: "Store", hours: int | None, dry_run: bool, web: Path | None) -> 
         print(plain(text))
         return 0
     send_telegram(net, text)
+    report = health_report(*health.problems(), LLM_ERRORS)
+    if report:
+        send_owner(net, report)
     store.mark([i["key"] for i in items] + [i["hash"] for i in items])
     store.put("last_run", now.isoformat())
     if web:

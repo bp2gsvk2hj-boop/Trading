@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
+import tomllib
 import unittest
 import unittest.mock
 from datetime import datetime, timedelta, timezone
@@ -112,6 +114,85 @@ class Render(unittest.TestCase):
         self.assertEqual(mt.match("СФО СБ Секьюритизация 7: рейтинг ruAAA.sf"), ["Сбер"])
 
 
+class Cases(unittest.TestCase):
+    """Пропуски, которые уже случались (tests/brokernews_cases.toml), не должны повториться."""
+
+    def test_known_cases(self):
+        with open(Path(__file__).with_name("brokernews_cases.toml"), "rb") as f:
+            cases = tomllib.load(f)
+        mt = m.Matcher(m.load_config())
+        for c in cases.get("case", []):
+            with self.subTest(c["note"]):
+                self.assertIn(c["section"], mt.match(c["text"]))
+        for c in cases.get("must_not", []):
+            with self.subTest(c["note"]):
+                self.assertEqual(mt.match(c["text"]), [])
+
+
+class Marks(unittest.TestCase):
+    items = Render.items
+
+    def test_kind_level_why(self):
+        data = {"main": [{"text": "ЦБ разрешил X", "src": [1], "kind": "official", "why": "Новый продукт"}],
+                "sections": {"sber": [{"text": "Посев: дисконтные облигации", "src": [2], "kind": "ad"}],
+                             "reputation": [{"text": "Сбой приложения", "src": [3], "level": "mass"}],
+                             "telegram": [{"text": "Автор ждёт снижения", "src": [4], "kind": "opinion",
+                                           "why": "не для этого раздела"}]}}
+        out = m.render(m.load_config(), data, self.items)
+        self.assertIn("• 🏛 ЦБ разрешил X", out)
+        self.assertIn("↳ <i>Для Сбера (оценка): Новый продукт</i>", out)
+        self.assertIn("📣 Посев: дисконтные облигации", out)
+        self.assertNotIn("Посев: Посев", out)
+        self.assertIn("<b>[массовая проблема]</b> Сбой", out)
+        self.assertIn("💬 Автор", out)
+        self.assertNotIn("не для этого раздела", out)
+        self.assertIn("🏛 официально", out)                      # legend
+        self.assertLess(out.index("РЕПУТАЦИЯ"), out.index("ЧТО ОБСУЖДАЮТ"))
+
+
+class HealthTest(unittest.TestCase):
+    def test_alerts_once_and_recovery(self):
+        db = sqlite3.connect(":memory:")
+        cfg = {"health": {"fail_runs": 2, "silence_days": 7}}
+        old = NOW - timedelta(days=10)
+
+        def run(ok_a, ok_b, last_c=NOW):
+            h = m.Health(db, cfg)
+            h.record("tg:a", "@a", ok_a, NOW if ok_a else None, "нет страницы")
+            h.record("rss:b", "b.ru", ok_b, error="HTTP 500")
+            h.record("tg:c", "@c", True, last_c)
+            return h.problems()
+
+        self.assertEqual(run(False, True), ([], []))             # one failure is not a problem yet
+        new, fixed = run(False, False, old)
+        self.assertEqual(len(new), 2)                             # @a twice in a row + @c silent
+        self.assertTrue(any("@a: не загружается 2" in x for x in new))
+        self.assertTrue(any("@c: молчит 10" in x for x in new))
+        new, _ = run(False, False, old)
+        self.assertFalse(any("@a" in x or "@c" in x for x in new))  # already reported
+        self.assertTrue(any("b.ru" in x for x in new))
+        new, fixed = run(True, True)
+        self.assertEqual(new, [])
+        self.assertEqual(sorted(fixed), ["• @a", "• @c", "• b.ru"])
+
+    def test_mass_telegram_failure(self):
+        h = m.Health(sqlite3.connect(":memory:"), {})
+        for i in range(5):
+            h.record(f"tg:{i}", f"@{i}", i == 0)
+        new, _ = h.problems()
+        self.assertIn("не читаются 4 из 5", new[0])
+        h.run.clear()
+        for i in range(5):
+            h.record(f"tg:{i}", f"@{i}", i == 0)
+        self.assertFalse(any("не читаются" in x for x in h.problems()[0]))   # not repeated
+
+    def test_report_text(self):
+        self.assertIsNone(m.health_report([], [], []))
+        r = m.health_report(["• @a: молчит 8 дн."], [], ["HTTP 429"])
+        self.assertIn("служебное", r)
+        self.assertIn("HTTP 429", r)
+
+
 class FakeNet:
     def __init__(self):
         self.sent = []
@@ -138,12 +219,19 @@ class Run(unittest.TestCase):
                     unittest.mock.patch.object(m.time, "sleep", lambda s: None), \
                     unittest.mock.patch.dict(os.environ, env):
                 m.cmd_run(24, False, Path(d) / "web")
-                self.assertEqual(len(net.sent), 1)
-                self.assertIn("СберИнвестиции", net.sent[0]["text"])
-                self.assertIn("https://t.me/banksta/101", net.sent[0]["text"])
+                digests = [p for p in net.sent if "Брокерский рынок" in p["text"]]
+                alerts = [p for p in net.sent if "служебное" in p["text"]]
+                self.assertEqual(len(digests), 1)
+                self.assertIn("СберИнвестиции", digests[0]["text"])
+                self.assertIn("https://t.me/banksta/101", digests[0]["text"])
+                self.assertEqual(len(alerts), 1)  # the other channels don't answer in this test
+                self.assertIn("не читаются", alerts[0]["text"])
                 self.assertTrue((Path(d) / "web" / "data.json").exists())
-                m.cmd_run(24, False, None)       # the same post is not sent again
-                self.assertEqual(len(net.sent), 1)
+                m.cmd_run(24, False, None)       # nothing new: no digest, only "2 runs in a row" per channel
+                self.assertEqual(len([p for p in net.sent if "Брокерский рынок" in p["text"]]), 1)
+                self.assertEqual(len(net.sent), 3)
+                self.assertIn("@frank_media: не загружается 2", net.sent[2]["text"])
+                self.assertNotIn("не читаются", net.sent[2]["text"])
 
     def test_recipients(self):
         with unittest.mock.patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "1", "BROKERNEWS_CHAT_IDS": ""}):
