@@ -4,10 +4,18 @@
 #   pass.sh collateral  LQDT rebalance only (18:45 MSK; fallbacks 19:35 and 22:35)
 #   pass.sh check       read-only: broker status + Telegram test message
 #   pass.sh trader      rebuild the «Помощник трейдера» data only (00:23 MSK, after the clearing)
+#   pass.sh news        broker market digest to Telegram + page /news/ (09:00 and 18:00 MSK)
 # Secrets come from /etc/trading-robot.env (systemd EnvironmentFile).
 set -uo pipefail
 MODE="${1:-pass}"
 cd "$(dirname "$0")/.."
+# Broker market digest: its own lock, so trading passes never wait for it (it takes a few minutes).
+if [ "$MODE" = news ]; then
+  exec 8>/tmp/brokernews.lock
+  flock -n 8 || { echo "[warn] digest already running"; exit 0; }
+  git pull -q --ff-only origin main || echo "[warn] git pull failed, running the current code"
+  exec "${PYTHON:-python3}" -m brokernews run ${TRADER_WEB:+--web "$TRADER_WEB/news"}
+fi
 # One pass at a time: the 18:45 rebalance and the 18:47 trading pass must not overlap.
 exec 9>/tmp/trading-robot.lock
 flock 9

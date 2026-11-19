@@ -6,11 +6,13 @@
 #  При первой установке спросит токены (T-Invest, Telegram-бот), потом ничего не спрашивает.
 #  Ставит таймеры:
 #   - проход каждые 15 минут по будням 10:02–18:47 МСК;
-#   - ребаланс LQDT в 18:45 МСК (запасные 19:35 и 22:35).
+#   - ребаланс LQDT в 18:45 МСК (запасные 19:35 и 22:35);
+#   - дайджест брокерского рынка в 09:00 и 18:00 МСК (brokernews, нужен ключ OpenAI).
 #  Повторный запуск обновляет установку; сохранённые рабочие токены берёт без вопросов.
 #  Проверка без торговли:  systemctl start trading-robot@check; journalctl -u trading-robot@check -n 30
 #  Логи:                   journalctl -u trading-robot@pass -n 100
 #  Помощник трейдера:      http://<IP сервера>:8080/
+#  Дайджесты рынка:        http://<IP сервера>:8080/news/ ; сейчас: systemctl start trading-robot@news
 #  Остановить робота:      systemctl disable --now trading-robot-pass.timer trading-robot-collateral.timer
 # =====================================================================
 set -euo pipefail
@@ -104,6 +106,19 @@ print(ids[-1] if ids else "")' 2>/dev/null || true)
     TGC=""
   done
 fi
+# OpenAI for the broker market digest: a saved key that works is kept; Enter skips (digest as a list of links).
+# api.openai.com is closed from Russia, so the check goes through the VPN exit.
+OAI=$(old OPENAI_API_KEY)
+oaiok() { [ "$(curl -s -o /dev/null -w '%{http_code}' -m 25 -x "${TGP:-socks5h://127.0.0.1:10810}" \
+  -H "Authorization: Bearer $1" https://api.openai.com/v1/models)" = 200 ]; }
+if [ -n "$OAI" ] && oaiok "$OAI"; then echo "Ключ OpenAI: сохранённый, подходит"
+else for try in 1 2 3; do
+  OAI=$(ask "Ключ OpenAI для дайджеста брокерского рынка (sk-..., Enter — без ChatGPT)" "$OAI" | tr -d '[:space:]')
+  [ -n "$OAI" ] || { echo "Без OpenAI: дайджест придёт списком ссылок без сводки"; break; }
+  oaiok "$OAI" && { echo "Ключ OpenAI подошёл"; break; }
+  echo "OpenAI не принял ключ (или api.openai.com недоступен через VPN)."
+  OAI=""
+done; fi
 [ -n "$TINV" ] || { echo "Без токена T-Invest робот работать не может"; exit 1; }
 umask 077
 cat > "$ENVF" <<EOT
@@ -111,6 +126,7 @@ TINVEST_TOKEN=$TINV
 TELEGRAM_BOT_TOKEN=$TGT
 TELEGRAM_CHAT_ID=$TGC
 TELEGRAM_PROXY=$TGP
+OPENAI_API_KEY=$OAI
 TRADER_WEB=/var/www/trader
 ROBOT_LIVE=yes
 PYTHON=$PY
@@ -121,7 +137,7 @@ say "Помощник трейдера: http://<IP сервера>:8080/"
 apt-get install -y -qq nginx >/dev/null
 # the stock site listens on port 80 and is not needed here
 rm -f /etc/nginx/sites-enabled/default /etc/nginx/trader.htpasswd
-install -d -o robot -g robot /var/www/trader
+install -d -o robot -g robot /var/www/trader /var/www/trader/news
 cp "$DIR/trader/index.html" /var/www/trader/index.html && chown robot:robot /var/www/trader/index.html
 cat > /etc/nginx/sites-available/trader <<'EOT'
 server {
@@ -129,6 +145,7 @@ server {
     root /var/www/trader;
     index index.html;
     location = /data.json { add_header Cache-Control "no-store"; }
+    location = /news/data.json { add_header Cache-Control "no-store"; }
 }
 EOT
 ln -sf /etc/nginx/sites-available/trader /etc/nginx/sites-enabled/trader
@@ -191,13 +208,29 @@ Unit=trading-robot@trader.service
 [Install]
 WantedBy=timers.target
 EOT
+cat > /etc/systemd/system/trading-robot-news.timer <<'EOT'
+[Unit]
+Description=Дайджест брокерского рынка (09:00 и 18:00 МСК)
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 Europe/Moscow
+OnCalendar=*-*-* 18:00:00 Europe/Moscow
+Unit=trading-robot@news.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOT
 systemctl daemon-reload
 
 say "Проверка связи с брокером и Telegram (без торговли)"
 if systemctl start trading-robot@check.service; then
   journalctl -u trading-robot@check -n 30 --no-pager -o cat
-  systemctl enable --now trading-robot-pass.timer trading-robot-collateral.timer trading-robot-trader.timer
-  echo "Готово, робот включён. Ближайшие запуски:"
+  systemctl enable --now trading-robot-pass.timer trading-robot-collateral.timer trading-robot-trader.timer \
+    trading-robot-news.timer
+  # first digest in the background: it arrives in Telegram in a few minutes
+  [ -f "$DIR/state/brokernews.db" ] || systemctl start --no-block trading-robot@news.service
+  echo "Готово, робот включён. Дайджест рынка придёт в Telegram через несколько минут. Ближайшие запуски:"
   systemctl list-timers 'trading-robot-*' --no-pager
 else
   journalctl -u trading-robot@check -n 30 --no-pager -o cat

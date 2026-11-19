@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#21A038">
+<title>Брокерский рынок — дайджесты</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--green:#21A038;--green-50:#E8F6EB;--green-700:#107A2B;--bg:#F2F4F7;--card:#FFF;--text:#1F1F22;--muted:#7D838A;--line:#E6E8EB;--chip:#EEF0F3;--blue:#2F80ED;
+  --shadow:0 1px 2px rgba(16,24,40,.04),0 2px 8px rgba(16,24,40,.04);--r:16px}
+@media (prefers-color-scheme: dark){:root{--green:#2FB84A;--green-50:#173322;--green-700:#5ED27A;--bg:#0F1114;--card:#1A1D21;--text:#F1F2F4;--muted:#9AA1A9;--line:#2A2E34;--chip:#24282E;--blue:#5B9BFF;--shadow:none}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.main{max-width:860px;margin:0 auto;padding:0 16px 48px}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 0 10px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px}
+.brand a{margin-left:auto;font-weight:500;font-size:14px;color:var(--muted);text-decoration:none}
+.logo{width:28px;height:28px;border-radius:9px;background:var(--green);display:grid;place-items:center;color:#fff;font-size:15px}
+input{width:100%;margin-top:12px;padding:10px 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit}
+.card{background:var(--card);border-radius:var(--r);padding:16px 18px;box-shadow:var(--shadow);margin-top:12px}
+.card h3{margin:0;font-size:16px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.badge{font-size:12.5px;font-weight:600;padding:3px 8px;border-radius:8px;background:var(--green-50);color:var(--green-700)}
+.body{white-space:pre-wrap;margin-top:10px}
+.body a{color:var(--blue);text-decoration:none}
+.card.closed .body{display:none}
+.card h3{cursor:pointer}
+.muted{color:var(--muted)} mark{background:#FFE58F;color:inherit;border-radius:3px}
+</style>
+</head>
+<body>
+<div class="main">
+<header>
+  <div class="brand"><span class="logo">📊</span>Брокерский рынок<a href="../">← Помощник трейдера</a></div>
+  <input id="q" type="search" placeholder="Поиск по дайджестам: Сбер, ИИС, Финам…">
+</header>
+<div id="view"><div class="card muted">Загрузка…</div></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// Дайджест — Telegram HTML: оставляем только <b>, <i>, <a href="http...">.
+function safe(html) {
+  const t = document.createElement("template"); t.innerHTML = html;
+  const walk = n => [...n.childNodes].forEach(c => {
+    if (c.nodeType !== 1) return;
+    const tag = c.tagName.toLowerCase();
+    if (!["b","i","a","u","s","strong","em"].includes(tag)) { c.replaceWith(...c.childNodes); walk(n); return; }
+    const href = c.getAttribute("href");
+    [...c.attributes].forEach(a => c.removeAttribute(a.name));
+    if (tag === "a" && /^https?:\/\//.test(href || "")) { c.href = href; c.target = "_blank"; c.rel = "noopener"; }
+    walk(c);
+  });
+  walk(t.content);
+  return t.innerHTML;
+}
+let digests = [];
+function render() {
+  const q = $("#q").value.trim().toLowerCase();
+  const list = q ? digests.filter(d => d.html.toLowerCase().includes(q)) : digests;
+  if (!list.length) { $("#view").innerHTML = `<div class="card muted">${q ? "Ничего не найдено" : "Дайджестов пока нет — первый появится после ближайшей рассылки."}</div>`; return; }
+  $("#view").innerHTML = list.map((d, i) => {
+    let body = safe(d.html);
+    if (q) body = body.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![^<]*>)`, "gi"), "<mark>$1</mark>");
+    return `<div class="card${i && !q ? " closed" : ""}"><h3>${esc(d.period)} <span class="badge">${d.count} материалов</span></h3><div class="body">${body}</div></div>`;
+  }).join("");
+  document.querySelectorAll(".card h3").forEach(h => h.onclick = () => h.parentElement.classList.toggle("closed"));
+}
+$("#q").oninput = render;
+fetch("data.json", {cache: "no-store"}).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d => { digests = d.digests || []; render(); })
+  .catch(e => { $("#view").innerHTML = `<div class="card muted">Дайджестов пока нет (${esc(e.message)}).</div>`; });
+</script>
+</body>
+</html>
