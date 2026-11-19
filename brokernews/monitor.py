@@ -294,14 +294,20 @@ def tg_resolve(net: Net, store: "Store | None", entry: str, before=None):
     if known in alts:
         alts.remove(known)
         alts.insert(0, known)
+    fresh_after = datetime.now(timezone.utc) - timedelta(days=30)
+    stale = None                      # вариант с постами, но заброшенный: берём, только если живых нет
     for name in alts:
         title, posts = tg_page(net, name, before)
         if posts:
-            if store and len(entry.split("|")) > 1:
+            if len(alts) > 1 and max(p["date"] for p in posts) < fresh_after:
+                stale = stale or (name, title, posts)
+                time.sleep(0.3)
+                continue
+            if store and len(alts) > 1:
                 store.put("tgname:" + entry.lower(), name)
             return name, title, posts
         time.sleep(0.3)
-    return alts[0], None, []
+    return stale or (alts[0], None, [])
 
 
 def collect_telegram(net, cfg, since, store, matcher, health: "Health | None" = None) -> list[dict]:

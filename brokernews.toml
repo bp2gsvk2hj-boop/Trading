@@ -33,14 +33,13 @@ channels = [
   "centralbank_russia",                                      # Банк России
   "rbc_news",                                                # РБК
   "interfaxonline",                                          # Интерфакс
-  "vtbmyinvestments",                                        # ВТБ Мои Инвестиции
   "brokervtb",                                               # ВТБ Брокер
   "alfawealth",                                              # Альфа-Капитал
   "corpbonds", "bonds_t", "taurenin", "erabond", "IF_Bonds", "Kolyuchie_Investitsii", "obligacii_prosto",
 ]
 # Официальные каналы компаний и регуляторов — в дайджесте помечаются 🏛
 official = ["centralbank_russia", "sberinvestments", "SberInvest", "sberinvestpro", "MoscowExchangeOfficial",
-            "moex_derivatives", "moex_bonds", "naufortelegram", "cbonds", "vtbmyinvestments", "brokervtb", "alfawealth"]
+            "moex_derivatives", "moex_bonds", "naufortelegram", "cbonds", "brokervtb", "alfawealth"]
 # Каналы, из которых брать все посты без фильтра по ключевым словам
 channels_all = []
 max_pages = 3            # страниц по ~20 постов с канала за запуск

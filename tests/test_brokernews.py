@@ -96,6 +96,18 @@ class Parsing(unittest.TestCase):
             self.assertEqual(calls, ["https://t.me/s/good"])          # the working name is tried first
             store.close()
 
+    def test_alias_skips_abandoned_channel(self):
+        old = TG_HTML.replace("2026-11-19T08:00:00", "2025-01-01T08:00:00").replace("2026-11-19T09:00:00", "2025-01-02T09:00:00")
+        fresh = TG_HTML.replace("2026-11-19T08:00:00", (NOW - timedelta(hours=1)).isoformat()[:19])
+
+        class Net:
+            def get(self, url, timeout=30):
+                return 200, (old if url.endswith("/s/dead") else fresh).encode()
+
+        with unittest.mock.patch.object(m.time, "sleep", lambda s: None):
+            self.assertEqual(m.tg_resolve(Net(), None, "dead|live")[0], "live")
+            self.assertEqual(m.tg_resolve(Net(), None, "dead")[0], "dead")       # a single name is kept as is
+
 
 class Filtering(unittest.TestCase):
     cfg = m.load_config()
