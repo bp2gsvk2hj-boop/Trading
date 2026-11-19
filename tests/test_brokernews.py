@@ -103,7 +103,8 @@ class Run(unittest.TestCase):
     def test_run_sends_once_and_publishes(self):
         with tempfile.TemporaryDirectory() as d:
             net = FakeNet()
-            env = {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "1", "OPENAI_API_KEY": ""}
+            env = {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "1", "OPENAI_API_KEY": "",
+                   "BROKERNEWS_CHAT_IDS": ""}
             with unittest.mock.patch.object(m, "STATE", Path(d)), \
                     unittest.mock.patch.object(m, "Net", lambda: net), \
                     unittest.mock.patch.object(m.time, "sleep", lambda s: None), \
@@ -115,6 +116,18 @@ class Run(unittest.TestCase):
                 self.assertTrue((Path(d) / "web" / "data.json").exists())
                 m.cmd_run(24, False, None)       # the same post is not sent again
                 self.assertEqual(len(net.sent), 1)
+
+    def test_recipients(self):
+        with unittest.mock.patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "1", "BROKERNEWS_CHAT_IDS": ""}):
+            self.assertEqual(m.news_chats(), ["1"])
+        with unittest.mock.patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "1",
+                                                   "BROKERNEWS_CHAT_IDS": "-1001, @team "}):
+            self.assertEqual(m.news_chats(), ["-1001", "@team"])
+            net = FakeNet()
+            with unittest.mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "t"}), \
+                    unittest.mock.patch.object(m.time, "sleep", lambda s: None):
+                m.send_telegram(net, "текст")
+            self.assertEqual([p["chat_id"] for p in net.sent], ["-1001", "@team"])
 
 
 if __name__ == "__main__":

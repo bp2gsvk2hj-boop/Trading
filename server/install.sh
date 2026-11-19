@@ -119,6 +119,35 @@ else for try in 1 2 3; do
   echo "OpenAI не принял ключ (или api.openai.com недоступен через VPN)."
   OAI=""
 done; fi
+# Digest recipients: a Telegram channel for colleagues (the bot posts there; anyone invited reads it),
+# else the robot chat. Trading notifications never go to the channel.
+NEWS=$(old BROKERNEWS_CHAT_IDS)
+if [ -n "$NEWS" ]; then echo "Дайджест рынка: получатели $NEWS"
+elif [ -n "$TGT" ]; then
+  BOTU=$(curl -s -m 20 ${TGP:+-x "$TGP"} "https://api.telegram.org/bot$TGT/getMe" | python3 -c \
+    'import json,sys; print(json.load(sys.stdin)["result"]["username"])' 2>/dev/null || true)
+  echo "Дайджест рынка можно публиковать в Telegram-канал, чтобы коллеги читали его там."
+  echo "Создайте канал (можно закрытый) и добавьте @$BOTU администратором с правом «Публикация сообщений»."
+  for try in 1 2 3; do
+    read -rp "Готово — Enter; n — присылать дайджест только вам: " A </dev/tty
+    [ "$A" = n ] || [ "$A" = N ] && break
+    NEWS=$(curl -s -m 20 ${TGP:+-x "$TGP"} "https://api.telegram.org/bot$TGT/getUpdates?allowed_updates=%5B%22my_chat_member%22%2C%22channel_post%22%5D" \
+      | python3 -c '
+import json, sys
+ids = []
+for u in json.load(sys.stdin).get("result", []):
+    m = u.get("my_chat_member") or u.get("channel_post") or {}
+    c = m.get("chat", {})
+    if c.get("type") == "channel" and (m.get("new_chat_member", {}).get("status", "administrator") == "administrator"):
+        ids.append(c["id"])
+print(ids[-1] if ids else "")' 2>/dev/null || true)
+    if [ -n "$NEWS" ] && curl -s -m 20 ${TGP:+-x "$TGP"} "https://api.telegram.org/bot$TGT/sendMessage" \
+         --data-urlencode "chat_id=$NEWS" --data-urlencode "text=📊 Здесь будет дайджест брокерского рынка (09:00 и 18:00 МСК)" \
+         | grep -q '"ok":true'; then echo "Канал найден: $NEWS"; break; fi
+    echo "Бот пока не видит канала или не может в нём публиковать. Проверьте, что он администратор."
+    NEWS=""
+  done
+fi
 [ -n "$TINV" ] || { echo "Без токена T-Invest робот работать не может"; exit 1; }
 umask 077
 cat > "$ENVF" <<EOT
@@ -127,6 +156,7 @@ TELEGRAM_BOT_TOKEN=$TGT
 TELEGRAM_CHAT_ID=$TGC
 TELEGRAM_PROXY=$TGP
 OPENAI_API_KEY=$OAI
+BROKERNEWS_CHAT_IDS=$NEWS
 TRADER_WEB=/var/www/trader
 ROBOT_LIVE=yes
 PYTHON=$PY

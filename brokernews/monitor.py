@@ -7,7 +7,8 @@ python3 -m brokernews channels
 (как robot/telegram.py — urllib не умеет SOCKS), сначала через выходы VPN на сервере
 (TELEGRAM_PROXY, иначе 127.0.0.1:10810/10811), затем напрямую. Xray сам отправляет российские
 сайты напрямую, остальное — через зарубежный сервер.
-Окружение (/etc/trading-robot.env): TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, OPENAI_API_KEY.
+Окружение (/etc/trading-robot.env): TELEGRAM_BOT_TOKEN, OPENAI_API_KEY и получатели —
+BROKERNEWS_CHAT_IDS (канал для коллег и т.п., через запятую), иначе TELEGRAM_CHAT_ID робота.
 Без OPENAI_API_KEY дайджест — список ссылок по разделам. Состояние — state/brokernews.db.
 """
 from __future__ import annotations
@@ -425,20 +426,35 @@ def plain(text: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", text))
 
 
+def news_chats() -> list[str]:
+    """Куда слать: BROKERNEWS_CHAT_IDS (через запятую: канал для коллег, личные чаты), иначе чат робота."""
+    ids = [c.strip() for c in (os.environ.get("BROKERNEWS_CHAT_IDS") or "").split(",") if c.strip()]
+    return ids or [c for c in [os.environ.get("TELEGRAM_CHAT_ID", "").strip()] if c]
+
+
 def send_telegram(net: Net, text: str) -> None:
-    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN", ""), os.environ.get("TELEGRAM_CHAT_ID", "")
-    if not token or not chat:
-        raise RuntimeError("нет TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID")
+    token, chats = os.environ.get("TELEGRAM_BOT_TOKEN", ""), news_chats()
+    if not token or not chats:
+        raise RuntimeError("нет TELEGRAM_BOT_TOKEN или получателей (BROKERNEWS_CHAT_IDS / TELEGRAM_CHAT_ID)")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    for part in split_message(text):
-        _, r = net.post_json(url, {"chat_id": chat, "text": part, "parse_mode": "HTML",
-                                   "disable_web_page_preview": True})
-        if not r.get("ok"):
-            log("warn", f"Telegram не принял HTML ({r.get('description')}), отправляю текстом")
-            _, r = net.post_json(url, {"chat_id": chat, "text": plain(part), "disable_web_page_preview": True})
-            if not r.get("ok"):
-                raise RuntimeError(f"Telegram: {r.get('description') or r}")
-        time.sleep(0.5)
+    failed = []
+    for chat in chats:
+        try:
+            for part in split_message(text):
+                _, r = net.post_json(url, {"chat_id": chat, "text": part, "parse_mode": "HTML",
+                                           "disable_web_page_preview": True})
+                if not r.get("ok"):
+                    log("warn", f"{chat}: Telegram не принял HTML ({r.get('description')}), отправляю текстом")
+                    _, r = net.post_json(url, {"chat_id": chat, "text": plain(part),
+                                               "disable_web_page_preview": True})
+                    if not r.get("ok"):
+                        raise RuntimeError(r.get("description") or str(r))
+                time.sleep(0.5)
+        except Exception as e:  # noqa: BLE001
+            log("warn", f"не отправлено в {chat}: {e}")
+            failed.append(chat)
+    if len(failed) == len(chats):
+        raise RuntimeError("дайджест не отправлен ни одному получателю")
 
 
 def publish_web(web: Path, entry: dict, keep: int = 90) -> None:
