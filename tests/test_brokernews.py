@@ -84,6 +84,34 @@ class Filtering(unittest.TestCase):
         self.assertIn('href="https://x/1?a=1&amp;b=2"', out)
 
 
+class Render(unittest.TestCase):
+    items = [dict(text=f"t{i}", url=f"https://t.me/c/{i}", source=f"TG: Канал {i}", groups=["Сбер"], date=NOW)
+             for i in range(1, 6)]
+
+    def test_no_repeats_headers_and_real_links(self):
+        data = {"main": [{"text": "Сбер выпустил дисконтные облигации", "src": [1, 2]}],
+                "sections": {"sber": [{"text": "То же событие ещё раз", "src": [2]},
+                                      {"text": "Посев: <b>СберИнвестиции</b>", "src": [3, 99]}],
+                             "market": [{"text": "ЦБ о брокерах", "src": [4]}],
+                             "unknown": [{"text": "чужой раздел", "src": [5]}]}}
+        out = m.render(m.load_config(), data, self.items)
+        self.assertEqual(out.count("Сбер выпустил"), 1)
+        self.assertNotIn("То же событие", out)                    # all its sources were already used
+        self.assertIn("<b>🔥 ГЛАВНОЕ</b>", out)
+        self.assertIn("<b>🟢 СБЕР</b>", out)
+        self.assertIn(m.RULE, out)
+        self.assertIn("&lt;b&gt;СберИнвестиции", out)              # model text is escaped
+        self.assertIn('<a href="https://t.me/c/1">Канал 1</a>', out)
+        self.assertNotIn("99", out)
+        self.assertNotIn("чужой раздел", out)
+        self.assertLess(out.index("СБЕР"), out.index("РЫНОК"))
+
+    def test_bond_keywords_across_lines(self):
+        mt = m.Matcher(m.load_config())
+        self.assertEqual(mt.match("Сбер разместил дисконтные\nоблигации"), ["Сбер"])
+        self.assertEqual(mt.match("СФО СБ Секьюритизация 7: рейтинг ruAAA.sf"), ["Сбер"])
+
+
 class FakeNet:
     def __init__(self):
         self.sent = []

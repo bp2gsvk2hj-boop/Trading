@@ -139,7 +139,7 @@ def text_hash(text: str) -> str:
 # ---- фильтр по ключевым словам ------------------------------------------------
 class Matcher:
     def __init__(self, cfg: dict):
-        f = re.IGNORECASE
+        f = re.IGNORECASE | re.DOTALL   # .{0,80} ловит слова и на соседних строках поста
         self.groups = {g: [re.compile(p, f) for p in pats] for g, pats in (cfg.get("keywords") or {}).items()}
         self.exclude = [re.compile(p, f) for p in cfg.get("exclude", {}).get("patterns", [])]
 
@@ -349,20 +349,49 @@ def dedup(items: list[dict]) -> list[dict]:
     return out
 
 
-def ask_llm(net: Net, cfg: dict, user: str) -> str | None:
+DEFAULT_SECTIONS = {
+    "sber": "🟢 СБЕР",
+    "competitors": "🏦 КОНКУРЕНТЫ",
+    "market": "📈 РЫНОК И РЕГУЛИРОВАНИЕ",
+    "telegram": "👀 ЧТО ОБСУЖДАЮТ В TELEGRAM",
+}
+GROUP_SECTION = {"Сбер": "sber", "Конкуренты": "competitors"}   # остальное -> market
+RULE = "━━━━━━━━━━━━━━━"
+
+JSON_FORMAT = """
+Ответ — строго JSON-объект без пояснений:
+{"main": [пункт, ...], "sections": {"<ключ раздела>": [пункт, ...]}}
+где пункт = {"text": "1–2 предложения с фактами и цифрами", "src": [номера материалов]}.
+Ключи разделов: %s.
+"main" — 3–5 самых значимых событий. КАЖДОЕ событие встречается в ответе РОВНО ОДИН раз:
+событие из "main" не повторяй в разделах; одно событие из разных источников — один пункт,
+все его номера в "src" (самые информативные первыми). В "text" — только обычный текст,
+без HTML, Markdown и ссылок: ссылки на источники программа добавит сама по номерам.
+"""
+
+
+def sections(cfg: dict) -> dict:
+    return cfg.get("sections") or DEFAULT_SECTIONS
+
+
+def ask_llm(net: Net, cfg: dict, user: str) -> dict | None:
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not key:
         return None
     llm = cfg.get("llm", {})
+    secs = sections(cfg)
+    system = llm.get("prompt", "") + JSON_FORMAT % ", ".join(f'"{k}" ({v})' for k, v in secs.items())
     code, r = net.post_json(llm.get("url", "https://api.openai.com/v1/chat/completions"),
                             {"model": llm.get("model", "gpt-5-mini"),
-                             "messages": [{"role": "system", "content": llm.get("prompt", "")},
+                             "response_format": {"type": "json_object"},
+                             "messages": [{"role": "system", "content": system},
                                           {"role": "user", "content": user}]},
                             {"Authorization": f"Bearer {key}"}, timeout=int(llm.get("timeout", 300)))
     if code != 200:
         raise RuntimeError(f"OpenAI HTTP {code}: {str(r.get('error') or r)[:300]}")
     text = r["choices"][0]["message"]["content"].strip()
-    return re.sub(r"^```\w*\n?|```$", "", text).strip()
+    text = re.sub(r"^```\w*\n?|```$", "", text).strip()
+    return json.loads(text)
 
 
 def sort_items(cfg: dict, items: list[dict]) -> list[dict]:
@@ -371,35 +400,93 @@ def sort_items(cfg: dict, items: list[dict]) -> list[dict]:
     return sorted(items, key=lambda it: (rank(it), -it["date"].timestamp()))
 
 
-def fallback_digest(items: list[dict], limit: int = 80) -> str:
-    out, cur = [], None
+def header(title: str) -> str:
+    return f"{RULE}\n<b>{html.escape(title)}</b>\n{RULE}"
+
+
+def source_links(nums, items: list[dict], limit: int = 3) -> str:
+    links, seen = [], set()
+    for n in nums or []:
+        try:
+            it = items[int(n) - 1]
+        except (ValueError, IndexError, TypeError):
+            continue
+        if it["url"] in seen:
+            continue
+        seen.add(it["url"])
+        name = it["source"].removeprefix("TG: ")
+        links.append(f'<a href="{html.escape(it["url"])}">{html.escape(name[:40])}</a>')
+        if len(links) == limit:
+            break
+    return " · ".join(links)
+
+
+def render(cfg: dict, data: dict, items: list[dict]) -> str:
+    """JSON модели -> Telegram HTML. Дубли отсекаются ещё раз: пункт, все источники которого
+    уже были в дайджесте, — повтор того же события."""
+    used: set[int] = set()
+    blocks = []
+
+    def points(lst) -> list[str]:
+        out = []
+        for p in lst or []:
+            if not isinstance(p, dict) or not str(p.get("text", "")).strip():
+                continue
+            src = {int(n) for n in p.get("src") or [] if str(n).isdigit() and 0 < int(n) <= len(items)}
+            if src and src <= used:
+                continue
+            used.update(src)
+            links = source_links(p.get("src"), items)
+            out.append(f"• {html.escape(str(p['text']).strip())}" + (f" — {links}" if links else ""))
+        return out
+
+    main = points(data.get("main"))
+    if main:
+        blocks.append(header("🔥 ГЛАВНОЕ") + "\n" + "\n\n".join(main))
+    for key, title in sections(cfg).items():
+        pts = points((data.get("sections") or {}).get(key))
+        if pts:
+            blocks.append(header(title) + "\n" + "\n\n".join(pts))
+    return "\n\n".join(blocks)
+
+
+def fallback_digest(items: list[dict], limit: int = 80, cfg: dict | None = None) -> str:
+    secs = sections(cfg or {})
+    by_sec: dict[str, list[dict]] = {}
     for it in items[:limit]:
-        g = it["groups"][0]
-        if g != cur:
-            out.append(f"\n<b>{html.escape(g)}</b>")
-            cur = g
-        t = html.escape(re.sub(r"\s+", " ", it["text"])[:220])
-        out.append(f"• {t} — <a href=\"{html.escape(it['url'])}\">{html.escape(it['source'])}</a>")
+        by_sec.setdefault(GROUP_SECTION.get(it["groups"][0], "market"), []).append(it)
+    blocks = []
+    for key, title in secs.items():
+        lst = by_sec.get(key)
+        if not lst:
+            continue
+        pts = []
+        for it in lst:
+            text = html.escape(re.sub(r"\s+", " ", it["text"])[:220])
+            link = f'<a href="{html.escape(it["url"])}">{html.escape(it["source"].removeprefix("TG: "))}</a>'
+            pts.append(f"• {text} — {link}")
+        blocks.append(header(title) + "\n" + "\n".join(pts))
     if len(items) > limit:
-        out.append(f"\n…и ещё {len(items) - limit}")
-    return "\n".join(out).strip()
+        blocks.append(f"…и ещё {len(items) - limit}")
+    return "\n\n".join(blocks)
 
 
 def build_digest(net, cfg, items, since, now) -> tuple[str, str]:
     period = f"{since.astimezone(MSK):%d.%m %H:%M} – {now.astimezone(MSK):%d.%m %H:%M} МСК"
-    items = sort_items(cfg, items)
     d = cfg.get("digest", {})
+    items = sort_items(cfg, items)[:int(d.get("max_items", 150))]
     lines = []
-    for i, it in enumerate(items[:int(d.get("max_items", 120))], 1):
+    for i, it in enumerate(items, 1):
         t = re.sub(r"\s+", " ", it["text"])[:int(d.get("max_chars", 600))]
         lines.append(f"[{i}] {it['date'].astimezone(MSK):%d.%m %H:%M} | {it['source']} | "
-                     f"{', '.join(it['groups'])} | {it['url']}\n{t}")
+                     f"{', '.join(it['groups'])}\n{t}")
     body = None
     try:
-        body = ask_llm(net, cfg, f"Период: {period}\n\n" + "\n\n".join(lines))
+        data = ask_llm(net, cfg, f"Период: {period}\n\n" + "\n\n".join(lines))
+        body = render(cfg, data, items) if data else None
     except Exception as e:  # noqa: BLE001
         log("warn", f"сводка ChatGPT не получилась, отправляю список: {e}")
-    return period, body or fallback_digest(items)
+    return period, body or fallback_digest(items, cfg=cfg)
 
 
 # ---- отправка ------------------------------------------------------------------
