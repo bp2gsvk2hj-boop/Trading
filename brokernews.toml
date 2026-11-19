@@ -21,25 +21,26 @@ channels = [
   "moex_bonds|moexbonds",                                    # MOEX Bonds
   "naufortelegram",                                          # НАУФОР
   "cbonds|cbonds_ru|cbondsru",                               # Cbonds
-  "frank_invest|frankmediainvest|frankmedia_invest|frank_media_invest",  # Frank Media Invest
+  "fm_invest",                                               # Frank Media Invest
   "frank_media",                                             # Frank Media
   "banksta",                                                 # Банкста
   "markettwits",                                             # MarketTwits
   "bitkogan",                                                # bitkogan
   "bondslab|bonds_lab|bondlab",                              # Bonds lab
-  "tihiedengi|tikhiedengi|tihie_dengi|tikhie_dengi",         # Тихие деньги: рынки и инвестиции
+  "silenceandmoney",                                         # Тихие деньги: рынки и инвестиции
   "goodbonds|good_bonds|goodbonds_channel",                  # Good Bonds (если это чат, а не канал, — не читается)
   # ранее добавленные
   "centralbank_russia",                                      # Банк России
   "rbc_news",                                                # РБК
   "interfaxonline",                                          # Интерфакс
   "vtbmyinvestments",                                        # ВТБ Мои Инвестиции
+  "brokervtb",                                               # ВТБ Брокер
   "alfawealth",                                              # Альфа-Капитал
   "corpbonds", "bonds_t", "taurenin", "erabond", "IF_Bonds", "Kolyuchie_Investitsii", "obligacii_prosto",
 ]
 # Официальные каналы компаний и регуляторов — в дайджесте помечаются 🏛
 official = ["centralbank_russia", "sberinvestments", "SberInvest", "sberinvestpro", "MoscowExchangeOfficial",
-            "moex_derivatives", "moex_bonds", "naufortelegram", "cbonds", "vtbmyinvestments", "alfawealth"]
+            "moex_derivatives", "moex_bonds", "naufortelegram", "cbonds", "vtbmyinvestments", "brokervtb", "alfawealth"]
 # Каналы, из которых брать все посты без фильтра по ключевым словам
 channels_all = []
 max_pages = 3            # страниц по ~20 постов с канала за запуск
