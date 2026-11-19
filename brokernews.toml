@@ -10,28 +10,35 @@ max_chars = 600       # длина текста одного материала 
 [telegram]
 # Публичные каналы читаются через t.me/s/<канал>, вход в Telegram не нужен.
 # Проверить список на сервере: sudo -u robot python3 -m brokernews channels (из /opt/trading)
+# Через «|» — варианты @имени, если точное неизвестно: бот сам найдёт рабочий.
 channels = [
-  "banksta",             # Банкста
-  "frank_media",         # Frank Media
-  "markettwits",         # MarketTwits
-  "centralbank_russia",  # Банк России
-  "rbc_news",            # РБК
-  "interfaxonline",      # Интерфакс
-  "vtbmyinvestments",    # ВТБ Мои Инвестиции
-  "alfawealth",          # Альфа-Капитал
-  "sberinvestments",     # СберИнвестиции (проверить имя)
-  "moex_official",       # Мосбиржа (проверить имя)
-  # облигации: здесь выходят посевы и разборы выпусков Сбера
-  "corpbonds",           # Корпоративные облигации
-  "bonds_t",             # Tauren | Облигации
-  "taurenin",            # Tauren
-  "erabond",             # Era Bond
-  "IF_Bonds",            # IF Bonds
-  "Kolyuchie_Investitsii",
-  "obligacii_prosto",
+  # каналы владельца (скриншоты 19.11.2026)
+  "sberinvestments|SberInvest|sberinvestment",               # СберИнвестиции
+  "sberinvestpro|sberinvestments_pro|SberInvestPRO",         # СберИнвестиции ПРО
+  "MoscowExchangeOfficial",                                  # MOEX — Московская биржа
+  "moex_derivatives|moexderivatives",                        # MOEX Derivatives
+  "moex_bonds|moexbonds",                                    # MOEX Bonds
+  "naufor|naufor_official|nauforofficial|naufor_ru",         # НАУФОР
+  "cbonds|cbonds_ru|cbondsru",                               # Cbonds
+  "frank_invest|frankmediainvest|frankmedia_invest|frank_media_invest",  # Frank Media Invest
+  "frank_media",                                             # Frank Media
+  "banksta",                                                 # Банкста
+  "markettwits",                                             # MarketTwits
+  "bitkogan",                                                # bitkogan
+  "bondslab|bonds_lab|bondlab",                              # Bonds lab
+  "tihiedengi|tikhiedengi|tihie_dengi|tikhie_dengi",         # Тихие деньги: рынки и инвестиции
+  "goodbonds|good_bonds|goodbonds_channel",                  # Good Bonds (если это чат, а не канал, — не читается)
+  # ранее добавленные
+  "centralbank_russia",                                      # Банк России
+  "rbc_news",                                                # РБК
+  "interfaxonline",                                          # Интерфакс
+  "vtbmyinvestments",                                        # ВТБ Мои Инвестиции
+  "alfawealth",                                              # Альфа-Капитал
+  "corpbonds", "bonds_t", "taurenin", "erabond", "IF_Bonds", "Kolyuchie_Investitsii", "obligacii_prosto",
 ]
 # Официальные каналы компаний и регуляторов — в дайджесте помечаются 🏛
-official = ["centralbank_russia", "sberinvestments", "moex_official", "vtbmyinvestments", "alfawealth"]
+official = ["centralbank_russia", "sberinvestments", "SberInvest", "sberinvestpro", "MoscowExchangeOfficial",
+            "moex_derivatives", "moex_bonds", "naufor", "naufor_official", "cbonds", "vtbmyinvestments", "alfawealth"]
 # Каналы, из которых брать все посты без фильтра по ключевым словам
 channels_all = []
 max_pages = 3            # страниц по ~20 постов с канала за запуск

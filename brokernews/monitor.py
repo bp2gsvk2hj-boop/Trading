@@ -271,26 +271,50 @@ def tg_page(net: Net, name: str, before: int | None = None) -> tuple[str | None,
 
 
 def channel_names(cfg: dict) -> list[tuple[str, bool]]:
+    """Каналы из настроек: [(имя, брать_всё)]. Имя может быть списком вариантов «a|b|c» —
+    если точное @имя неизвестно; читается первый вариант, у которого есть посты."""
     t = cfg.get("telegram", {})
     out, seen = [], set()
     for names, take_all in ((t.get("channels_all", []), True), (t.get("channels", []), False)):
         for n in names:
-            n = str(n).rsplit("/", 1)[-1].lstrip("@").strip()
+            alts = [a.rsplit("/", 1)[-1].lstrip("@").strip() for a in str(n).split("|")]
+            n = "|".join(a for a in alts if a)
             if n and n.lower() not in seen:
                 seen.add(n.lower())
                 out.append((n, take_all))
     return out
 
 
+def tg_resolve(net: Net, store: "Store | None", entry: str, before=None):
+    """Вариант @имени с постами -> (имя, заголовок, посты). Рабочий вариант запоминается."""
+    alts = entry.split("|")
+    known = store.get("tgname:" + entry.lower()) if store and len(alts) > 1 else None
+    if known in alts:
+        alts.remove(known)
+        alts.insert(0, known)
+    for name in alts:
+        title, posts = tg_page(net, name, before)
+        if posts:
+            if store and len(entry.split("|")) > 1:
+                store.put("tgname:" + entry.lower(), name)
+            return name, title, posts
+        time.sleep(0.3)
+    return alts[0], None, []
+
+
 def collect_telegram(net, cfg, since, store, matcher, health: "Health | None" = None) -> list[dict]:
     pages_max = int(cfg.get("telegram", {}).get("max_pages", 3))
     official = {n.lower().lstrip("@") for n in cfg.get("telegram", {}).get("official", [])}
     items, bad = [], []
-    for name, take_all in channel_names(cfg):
+    for entry, take_all in channel_names(cfg):
+        name = entry.split("|")[0]
         try:
             title, posts, before = None, [], None
-            for _ in range(pages_max):
-                t, batch = tg_page(net, name, before)
+            for page in range(pages_max):
+                if page == 0:
+                    name, t, batch = tg_resolve(net, store, entry)
+                else:
+                    t, batch = tg_page(net, name, before)
                 title = title or t
                 if not batch:
                     break
@@ -300,13 +324,15 @@ def collect_telegram(net, cfg, since, store, matcher, health: "Health | None" = 
                     break
                 before = oldest["id"]
                 time.sleep(0.4)
+            label = f"@{name}" if posts or "|" not in entry else "@" + " / @".join(entry.split("|"))
             if health:
-                health.record(f"tg:{name.lower()}", f"@{name}", bool(posts),
+                health.record(f"tg:{entry.lower()}", label, bool(posts),
                               max((p["date"] for p in posts), default=None), "не найден или пустая страница")
             if not posts:
-                bad.append(name)
+                bad.append(label)
                 continue
-            kind = "официально" if name.lower() in official else "Telegram-канал"
+            aliases = {a.lower() for a in entry.split("|")}
+            kind = "официально" if aliases & official else "Telegram-канал"
             for p in posts:
                 if p["date"] < since or len(p["text"]) < 20:
                     continue
@@ -320,7 +346,7 @@ def collect_telegram(net, cfg, since, store, matcher, health: "Health | None" = 
         except Exception as e:  # noqa: BLE001
             log("warn", f"t.me/s/{name}: {e}")
             if health:
-                health.record(f"tg:{name.lower()}", f"@{name}", False, error=str(e))
+                health.record(f"tg:{entry.lower()}", f"@{name}", False, error=str(e))
         time.sleep(0.4)
     if bad:
         log("warn", "каналы не найдены или без веб-версии: " + ", ".join(bad))
@@ -757,19 +783,23 @@ def _run(store: "Store", hours: int | None, dry_run: bool, web: Path | None) -> 
 
 def cmd_channels() -> int:
     cfg, net, ok = load_config(), Net(), 0
+    store = Store(STATE / "brokernews.db")
     names = channel_names(cfg)
-    for name, _ in names:
-        try:
-            title, posts = tg_page(net, name)
-        except Exception as e:  # noqa: BLE001
-            title, posts = str(e)[:60], []
-        if posts:
-            ok += 1
-            last = max(p["date"] for p in posts).astimezone(MSK)
-            print(f"  OK   @{name:<26} {title} (последний пост {last:%d.%m.%Y})")
-        else:
-            print(f"  НЕТ  @{name:<26} не найден или без публичной веб-версии")
-        time.sleep(0.4)
+    try:
+        for entry, _ in names:
+            try:
+                name, title, posts = tg_resolve(net, store, entry)
+            except Exception as e:  # noqa: BLE001
+                name, title, posts = entry, str(e)[:60], []
+            if posts:
+                ok += 1
+                last = max(p["date"] for p in posts).astimezone(MSK)
+                print(f"  OK   @{name:<26} {title} (последний пост {last:%d.%m.%Y})")
+            else:
+                print(f"  НЕТ  @{entry.replace('|', ' / @'):<26} не найден или без публичной веб-версии")
+            time.sleep(0.4)
+    finally:
+        store.close()
     print(f"Работают {ok} из {len(names)}")
     return 0
 

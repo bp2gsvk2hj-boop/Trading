@@ -58,8 +58,24 @@ class Parsing(unittest.TestCase):
         self.assertEqual(items[0]["link"], "https://ex.ru/2")
 
     def test_channel_names(self):
-        cfg = {"telegram": {"channels": ["@a", "https://t.me/b", "A"], "channels_all": ["c"]}}
-        self.assertEqual(m.channel_names(cfg), [("c", True), ("a", False), ("b", False)])
+        cfg = {"telegram": {"channels": ["@a", "https://t.me/b", "A", "x|@y"], "channels_all": ["c"]}}
+        self.assertEqual(m.channel_names(cfg), [("c", True), ("a", False), ("b", False), ("x|y", False)])
+
+    def test_alias_resolution_is_remembered(self):
+        calls = []
+
+        class Net:
+            def get(self, url, timeout=30):
+                calls.append(url)
+                return (200, TG_HTML.encode()) if url.endswith("/s/good") else (404, b"")
+
+        with tempfile.TemporaryDirectory() as d, unittest.mock.patch.object(m.time, "sleep", lambda s: None):
+            store = m.Store(Path(d) / "s.db")
+            self.assertEqual(m.tg_resolve(Net(), store, "bad|good")[0], "good")
+            calls.clear()
+            self.assertEqual(m.tg_resolve(Net(), store, "bad|good")[0], "good")
+            self.assertEqual(calls, ["https://t.me/s/good"])          # the working name is tried first
+            store.close()
 
 
 class Filtering(unittest.TestCase):
