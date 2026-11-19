@@ -3,13 +3,14 @@
 #  Торговый робот Тбанк на своём сервере (Ubuntu 22.04/24.04, Яндекс Облако).
 #  Одна команда на сервере:
 #     curl -fsSL https://raw.githubusercontent.com/bp2gsvk2hj-boop/Trading/main/server/install.sh | sudo bash
-#  Спросит токены (T-Invest, Telegram-бот, chat_id) и поставит таймеры:
+#  При первой установке спросит токены (T-Invest, Telegram-бот), потом ничего не спрашивает.
+#  Ставит таймеры:
 #   - проход каждые 15 минут по будням 10:02–18:47 МСК;
 #   - ребаланс LQDT в 18:45 МСК (запасные 19:35 и 22:35).
-#  Повторный запуск обновляет установку; токены можно оставить прежними (Enter).
+#  Повторный запуск обновляет установку; сохранённые рабочие токены берёт без вопросов.
 #  Проверка без торговли:  systemctl start trading-robot@check; journalctl -u trading-robot@check -n 30
 #  Логи:                   journalctl -u trading-robot@pass -n 100
-#  Помощник трейдера:      http://<IP сервера>:8080/ (логин и пароль спросит установщик)
+#  Помощник трейдера:      http://<IP сервера>:8080/
 #  Остановить робота:      systemctl disable --now trading-robot-pass.timer trading-robot-collateral.timer
 # =====================================================================
 set -euo pipefail
@@ -57,34 +58,39 @@ tcheck() {
     https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1.UsersService/GetAccounts
 }
 TINV=$(old TINVEST_TOKEN)
-for try in 1 2 3; do
+# A saved token that still works is kept without asking: a re-run needs no input at all.
+if [ -n "$TINV" ] && [ "$(tcheck "$TINV")" = 200 ]; then echo "Токен T-Invest: сохранённый, подходит"
+else for try in 1 2 3; do
   TINV=$(ask "Токен T-Invest (с правом торговли)" "$TINV" | tr -d '[:space:]')
   code=$(tcheck "$TINV")
   [ "$code" = 200 ] && { echo "Токен T-Invest подошёл"; break; }
   echo "Брокер не принял токен (HTTP $code, длина ${#TINV} символов). Скопируйте его целиком и вставьте ещё раз."
   TINV=""
   [ "$try" = 3 ] && { echo "Робот НЕ включён"; exit 1; }
-done
+done; fi
 # Telegram: the robot's previous settings, else the VPN monitor's bot on this server.
 TGT=$(old TELEGRAM_BOT_TOKEN); TGC=$(old TELEGRAM_CHAT_ID)
 [ -n "$TGT" ] || { TGT=$(vpn TG_TOKEN); TGC=$(vpn TG_CHAT); }
 # The VPN's local SOCKS exit to Telegram (127.0.0.1:10810), if there is one.
 TGP=""; ss -ltn 'sport = :10810' | grep -q LISTEN && TGP=socks5h://127.0.0.1:10810
 TGT=$(printf '%s' "$TGT" | tr -d "\"' ")
+tgok() { curl -s -m 20 ${TGP:+-x "$TGP"} "https://api.telegram.org/bot$TGT/$1" | grep -q '"ok":true'; }
 # Ask until Telegram accepts the bot token (getMe); an empty answer skips notifications.
-for try in 1 2 3; do
+if [ -n "$TGT" ] && tgok getMe; then echo "Токен Telegram: сохранённый, подходит"
+else for try in 1 2 3; do
   TGT=$(ask "Токен Telegram-бота (от @BotFather, вида 123456:ABC...)" "$TGT" | tr -d "[:space:]\"'")
   [ -n "$TGT" ] || { echo "Без Telegram: робот будет торговать без уведомлений"; break; }
   curl -s -m 20 ${TGP:+-x "$TGP"} "https://api.telegram.org/bot$TGT/getMe" | grep -q '"ok":true' \
     && { echo "Токен Telegram подошёл"; break; }
   echo "Telegram не принял токен бота. Возьмите его в @BotFather: /mybots → бот → API Token."
   TGT=""
-done
+done; fi
 # chat_id: check that the bot can write there; otherwise take it from the last message to the bot.
 tgsend() { curl -s -m 20 ${TGP:+-x "$TGP"} "https://api.telegram.org/bot$TGT/sendMessage" \
   --data-urlencode "chat_id=$1" --data-urlencode "text=Торговый робот: проверка связи" | grep -q '"ok":true'; }
 TGC=$(printf '%s' "$TGC" | tr -d "[:space:]\"'")
-if [ -n "$TGT" ] && ! { [ -n "$TGC" ] && tgsend "$TGC"; }; then
+if [ -n "$TGT" ] && [ -n "$TGC" ] && tgok "getChat?chat_id=$TGC"; then echo "Telegram chat_id: сохранённый, подходит"
+elif [ -n "$TGT" ]; then
   for try in 1 2 3; do
     read -rp "Откройте бота в Telegram, нажмите «Старт» или напишите ему любое сообщение, затем нажмите Enter здесь " _ </dev/tty
     TGC=$(curl -s -m 20 ${TGP:+-x "$TGP"} "https://api.telegram.org/bot$TGT/getUpdates" | python3 -c '
@@ -111,33 +117,17 @@ PYTHON=$PY
 EOT
 umask 022
 
-say "Помощник трейдера: http://<IP сервера>:8080/ с логином и паролем"
-apt-get install -y -qq nginx openssl >/dev/null
+say "Помощник трейдера: http://<IP сервера>:8080/"
+apt-get install -y -qq nginx >/dev/null
 # the stock site listens on port 80 and is not needed here
-rm -f /etc/nginx/sites-enabled/default
+rm -f /etc/nginx/sites-enabled/default /etc/nginx/trader.htpasswd
 install -d -o robot -g robot /var/www/trader
 cp "$DIR/trader/index.html" /var/www/trader/index.html && chown robot:robot /var/www/trader/index.html
-HTP=/etc/nginx/trader.htpasswd
-TLOGIN=$( [ -f "$HTP" ] && cut -d: -f1 "$HTP" || echo trader )
-read -rp "Логин для входа (Enter — $TLOGIN): " v </dev/tty
-TLOGIN=${v:-$TLOGIN}
-while :; do
-  read -rsp "Пароль для входа$( [ -f "$HTP" ] && echo ' (Enter — оставить прежний)'): " TPASS </dev/tty; echo
-  if [ -z "$TPASS" ] && [ -f "$HTP" ]; then
-    sed -i "s/^[^:]*:/$TLOGIN:/" "$HTP"; break
-  fi
-  [ ${#TPASS} -ge 8 ] && break
-  echo "Нужно не меньше 8 символов"
-done
-[ -z "${TPASS:-}" ] || printf '%s:%s\n' "$TLOGIN" "$(openssl passwd -apr1 "$TPASS")" > "$HTP"
-chown root:www-data "$HTP"; chmod 640 "$HTP"
 cat > /etc/nginx/sites-available/trader <<'EOT'
 server {
     listen 8080;
     root /var/www/trader;
     index index.html;
-    auth_basic "Помощник трейдера";
-    auth_basic_user_file /etc/nginx/trader.htpasswd;
     location = /data.json { add_header Cache-Control "no-store"; }
 }
 EOT
