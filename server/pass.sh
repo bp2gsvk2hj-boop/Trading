@@ -3,6 +3,7 @@
 #   pass.sh pass        trading pass (systemd timer every 15 min, 10:02-18:47 MSK)
 #   pass.sh collateral  LQDT rebalance only (18:45 MSK; fallbacks 19:35 and 22:35)
 #   pass.sh check       read-only: broker status + Telegram test message
+#   pass.sh trader      rebuild the «Помощник трейдера» data only (00:23 MSK, after the clearing)
 # Secrets come from /etc/trading-robot.env (systemd EnvironmentFile).
 set -uo pipefail
 MODE="${1:-pass}"
@@ -14,6 +15,15 @@ git pull -q --ff-only origin main || echo "[warn] git pull failed, running the c
 
 [ "$MODE" = check ] && exec server/check.sh
 PY="${PYTHON:-python3}"
+
+# «Помощник трейдера» (served by nginx from $TRADER_WEB): page from the repo, data from the account.
+trader() {
+  [ -n "${TRADER_WEB:-}" ] && [ -d "$TRADER_WEB" ] || return 0
+  cp trader/index.html "$TRADER_WEB/index.html"
+  $PY trader/build_data.py --out "$TRADER_WEB/data.json.new" >/dev/null \
+    && mv "$TRADER_WEB/data.json.new" "$TRADER_WEB/data.json" || echo "[warn] trader data not rebuilt"
+}
+[ "$MODE" = trader ] && { trader; exit 0; }
 LOG=$(mktemp); STATUS=$(mktemp); trap 'rm -f "$LOG" "$STATUS"' EXIT
 if [ "$MODE" = collateral ]; then
   $PY -m robot collateral 2>&1 | tee "$LOG"; rc=${PIPESTATUS[0]}
@@ -29,4 +39,5 @@ if [ "$MODE" = pass ] && [ "$(TZ=Europe/Moscow date +%H%M)" -ge 1845 ]; then
   args+=(--summary)
 fi
 $PY -m robot.telegram "${args[@]}" || echo "[warn] telegram notification failed"
+trader
 exit "$rc"

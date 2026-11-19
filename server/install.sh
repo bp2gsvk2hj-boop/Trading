@@ -9,6 +9,7 @@
 #  Повторный запуск обновляет установку; токены можно оставить прежними (Enter).
 #  Проверка без торговли:  systemctl start trading-robot@check; journalctl -u trading-robot@check -n 30
 #  Логи:                   journalctl -u trading-robot@pass -n 100
+#  Помощник трейдера:      http://<IP сервера>:8080/ (логин и пароль спросит установщик)
 #  Остановить робота:      systemctl disable --now trading-robot-pass.timer trading-robot-collateral.timer
 # =====================================================================
 set -euo pipefail
@@ -104,10 +105,48 @@ TINVEST_TOKEN=$TINV
 TELEGRAM_BOT_TOKEN=$TGT
 TELEGRAM_CHAT_ID=$TGC
 TELEGRAM_PROXY=$TGP
+TRADER_WEB=/var/www/trader
 ROBOT_LIVE=yes
 PYTHON=$PY
 EOT
 umask 022
+
+say "Помощник трейдера: http://<IP сервера>:8080/ с логином и паролем"
+apt-get install -y -qq nginx openssl >/dev/null
+# the stock site listens on port 80 and is not needed here
+rm -f /etc/nginx/sites-enabled/default
+install -d -o robot -g robot /var/www/trader
+cp "$DIR/trader/index.html" /var/www/trader/index.html && chown robot:robot /var/www/trader/index.html
+HTP=/etc/nginx/trader.htpasswd
+TLOGIN=$( [ -f "$HTP" ] && cut -d: -f1 "$HTP" || echo trader )
+read -rp "Логин для входа (Enter — $TLOGIN): " v </dev/tty
+TLOGIN=${v:-$TLOGIN}
+while :; do
+  read -rsp "Пароль для входа$( [ -f "$HTP" ] && echo ' (Enter — оставить прежний)'): " TPASS </dev/tty; echo
+  if [ -z "$TPASS" ] && [ -f "$HTP" ]; then
+    sed -i "s/^[^:]*:/$TLOGIN:/" "$HTP"; break
+  fi
+  [ ${#TPASS} -ge 8 ] && break
+  echo "Нужно не меньше 8 символов"
+done
+[ -z "${TPASS:-}" ] || printf '%s:%s\n' "$TLOGIN" "$(openssl passwd -apr1 "$TPASS")" > "$HTP"
+chown root:www-data "$HTP"; chmod 640 "$HTP"
+cat > /etc/nginx/sites-available/trader <<'EOT'
+server {
+    listen 8080;
+    root /var/www/trader;
+    index index.html;
+    auth_basic "Помощник трейдера";
+    auth_basic_user_file /etc/nginx/trader.htpasswd;
+    location = /data.json { add_header Cache-Control "no-store"; }
+}
+EOT
+ln -sf /etc/nginx/sites-available/trader /etc/nginx/sites-enabled/trader
+nginx -t -q && systemctl enable -q nginx && systemctl reload-or-restart nginx
+# first data right away (also rebuilt after every robot pass)
+systemd-run --wait --quiet -p User=robot -p EnvironmentFile="$ENVF" -p WorkingDirectory="$DIR" \
+  "${PY}" trader/build_data.py --out /var/www/trader/data.json \
+  && echo "Данные помощника собраны" || echo "[warn] данные помощника пока не собраны — соберутся после прохода робота"
 
 say "Таймеры systemd"
 cat > /etc/systemd/system/trading-robot@.service <<EOT
@@ -149,12 +188,23 @@ AccuracySec=10s
 [Install]
 WantedBy=timers.target
 EOT
+cat > /etc/systemd/system/trading-robot-trader.timer <<'EOT'
+[Unit]
+Description=Помощник трейдера: данные после вечернего клиринга (00:23 МСК)
+
+[Timer]
+OnCalendar=Tue..Sat *-*-* 00:23:00 Europe/Moscow
+Unit=trading-robot@trader.service
+
+[Install]
+WantedBy=timers.target
+EOT
 systemctl daemon-reload
 
 say "Проверка связи с брокером и Telegram (без торговли)"
 if systemctl start trading-robot@check.service; then
   journalctl -u trading-robot@check -n 30 --no-pager -o cat
-  systemctl enable --now trading-robot-pass.timer trading-robot-collateral.timer
+  systemctl enable --now trading-robot-pass.timer trading-robot-collateral.timer trading-robot-trader.timer
   echo "Готово, робот включён. Ближайшие запуски:"
   systemctl list-timers 'trading-robot-*' --no-pager
 else
