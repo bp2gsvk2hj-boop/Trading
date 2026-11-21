@@ -186,7 +186,7 @@ function render() {
   const tDir = [['Российские сайты — напрямую', tsum('direct'), C.amber], ['Через основной сервер', tsum('f1'), C.green], ['Через резерв', tsum('f2'), C.purple]];
   const tDev = [['Приложение (телефон, планшет)', tsum('app'), C.blue], ['Домашний роутер', tsum('router'), '#38b2ac']];
   const dirT = tDir.reduce((a, x) => a + x[1], 0), devT = tDev.reduce((a, x) => a + x[1], 0);
-  const trafficCard = dirT + devT > 0 ? `<div class="card"><h3>Трафик за ${RL}</h3><div class="sub">всего ${fmtMB(devT || dirT)} · без служебных замеров</div>
+  const trafficCard = dirT + devT > 0 ? `<div class="card"><h3>Трафик за ${RL}</h3><div class="sub">всего ${fmtMB(devT || dirT)} · один и тот же трафик в двух разрезах: куда ушёл и с какого устройства</div>
       <div class="sec">куда</div>${bars(tDir, dirT)}<div class="sec">с каких устройств</div>${bars(tDev, devT)}</div>`
     : `<div class="card"><h3>Трафик</h3><div class="sub">данные появятся после первых замеров</div></div>`;
 

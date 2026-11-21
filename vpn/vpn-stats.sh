@@ -93,10 +93,10 @@ lat() {  # медиана 3 проб через сервер, мс; пусто �
   done
   [ ${#a[@]} -gt 0 ] && printf '%s\n' "${a[@]}" | sort -n | sed -n "$(( (${#a[@]}+1)/2 ))p" | awk '{printf "%.0f", $1*1000}'
 }
-TESTBYTES=0
-speed() {  # скачивание 20 МБ через сервер, Мбит/с
+TB1=0; TB2=0
+speed() {  # $1 порт, $2 номер сервера  # скачивание 20 МБ через сервер, Мбит/с
   local r; r=$(curl -s -o /dev/null -m 40 -w '%{speed_download} %{size_download}' -x "socks5h://127.0.0.1:$1" 'https://speed.cloudflare.com/__down?bytes=20000000')
-  TESTBYTES=$(( TESTBYTES + ${r#* } ))
+  eval "TB$2=\$(( TB$2 + ${r#* } ))"
   awk -v s="${r%% *}" -v n="${r#* }" 'BEGIN{ if (n+0 >= 19000000) printf "%.0f", s*8/1e6 }'
 }
 services() {  # код ответа популярных сервисов через сервер: 2xx/3xx — открывается, 403 — не пускает IP
@@ -125,7 +125,7 @@ for i in 1 2; do
   H=$(eval echo "\${UP${i}_HOST:-}"); [ -n "$H" ] || continue
   P=$((10810+i)); MS=$(lat $P); MB=""
   if [ -n "$MS" ] && [ $DO_SPEED = 1 ]; then
-    MB=$(speed $P)
+    speed $P $i > "$ST/sp"; MB=$(cat "$ST/sp")
     jq --arg k "s$i" --argjson r "$(services $P)" '.[$k] = {t: (now|floor), res: $r}' "$ST/svc.json" > "$ST/svc.new" && mv "$ST/svc.new" "$ST/svc.json"
   fi
   S=$(jq --arg k "s$i" --arg ms "$MS" --arg mb "$MB" --arg pl "$(place $P)" \
@@ -133,14 +133,14 @@ for i in 1 2; do
 done
 
 # трафик за интервал, МБ (замеры скорости вычитаем — это не ваш трафик)
-TR=$(jq -c --argjson tb "$TESTBYTES" '
+TR=$(jq -c --argjson tb1 "$TB1" --argjson tb2 "$TB2" '
   def mb(a; b): (((.[a] // 0) + (.[b] // 0)) / 1048576);
   {direct: mb("outbound>>>direct>>>traffic>>>uplink"; "outbound>>>direct>>>traffic>>>downlink"),
    f1: mb("outbound>>>foreign1>>>traffic>>>uplink"; "outbound>>>foreign1>>>traffic>>>downlink"),
    f2: mb("outbound>>>foreign2>>>traffic>>>uplink"; "outbound>>>foreign2>>>traffic>>>downlink"),
    app: mb("inbound>>>vless-in>>>traffic>>>uplink"; "inbound>>>vless-in>>>traffic>>>downlink"),
    router: mb("inbound>>>wg-in>>>traffic>>>uplink"; "inbound>>>wg-in>>>traffic>>>downlink")}
-  | .f1 = ([.f1 - ($tb/1048576), 0] | max)
+  | .f1 = ([.f1 - ($tb1/1048576), 0] | max) | .f2 = ([.f2 - ($tb2/1048576), 0] | max)
   | map_values(. * 10 | round / 10)' <<<"$XS")
 
 # сервер в Москве: процессор (по /proc/stat между запусками), память, подключения
