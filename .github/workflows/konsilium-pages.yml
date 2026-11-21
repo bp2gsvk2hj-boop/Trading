@@ -6,7 +6,7 @@ name: Publish Pages (Konsilium + bonds + placements)
 on:
   push:
     branches: [main]
-    paths: ["konsilium/**", "bonds/**", "placements/**", ".github/workflows/konsilium-pages.yml"]
+    paths: ["konsilium/**", "bonds/**", "placements/**", "vpnstatus/**", ".github/workflows/konsilium-pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,8 @@ jobs:
           cp -r bonds/. _site/bonds/
           mkdir -p _site/placements
           cp -r placements/. _site/placements/
+          mkdir -p _site/vpn-status
+          cp -r vpnstatus/. _site/vpn-status/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
