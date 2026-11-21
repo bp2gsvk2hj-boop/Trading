@@ -19,7 +19,7 @@ X=/usr/local/etc/xray; ENV=$X/vpn.env; SENV=$X/stats.env
 ST=/var/lib/vpn-stats; mkdir -p "$ST"; HIST=$ST/history.json
 PAGE="https://bp2gsvk2hj-boop.github.io/Trading/vpn-status/"
 KEEP=672            # точек истории: 7 суток по 15 минут
-SPEED_EVERY=12      # замер скорости раз в 12 запусков = раз в 3 часа
+SPEED_EVERY=4       # замер скорости раз в 4 запуска = раз в час
 [ -f "$ENV" ] || { echo "VPN не установлен"; exit 1; }
 . "$ENV"; [ -f "$SENV" ] && . "$SENV"
 

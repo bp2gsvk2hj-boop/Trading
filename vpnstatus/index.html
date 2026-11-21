@@ -6,7 +6,6 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#0f1621">
 <title>VPN · состояние</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
   :root{
     --bg:#0f1621; --card:#172130; --card2:#1d2a3c; --line:#26354a; --text:#e8eef6; --mute:#8b9bb0;
@@ -37,7 +36,10 @@
   .tabs{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:12px}
   .tabs button{background:none;border:0;color:var(--mute);font:inherit;font-size:14px;padding:6px 14px;border-radius:9px;cursor:pointer}
   .tabs button.on{background:var(--card2);color:var(--text)}
-  canvas{width:100%!important;height:220px!important}
+  .chart{width:100%}
+  .chart svg{display:block;width:100%;height:230px}
+  .lg{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#c9d4e2;margin:-4px 0 6px}
+  .lg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
   .ev{list-style:none;margin:0;padding:0}
   .ev li{display:flex;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:14px}
   .ev li:first-child{border-top:0}
@@ -57,7 +59,7 @@ const $ = s => document.querySelector(s);
 const C = {green:'#34c37a', amber:'#f2b134', red:'#ef5d5d', blue:'#4c9be8', purple:'#a37ef0', grey:'#6b7a8f', mute:'#8b9bb0', line:'#26354a'};
 let GIST = (location.hash || '').replace('#', '').trim();
 try { if (GIST) localStorage.setItem('vpnGist', GIST); else GIST = localStorage.getItem('vpnGist') || ''; } catch (e) {}
-let DATA = null, RANGE = 24, charts = [];
+let DATA = null, RANGE = 24;
 
 const fmtAgo = s => s < 90 ? 'только что' : s < 3600 ? `${Math.round(s/60)} мин назад` : s < 86400 ? `${Math.round(s/3600)} ч назад` : `${Math.round(s/86400)} дн назад`;
 const two = n => String(n).padStart(2, '0');
@@ -119,7 +121,7 @@ function render() {
       <div class="kv">
         <div><b>${n.ms != null ? n.ms + ' мс' : '—'}</b><span>задержка сейчас</span></div>
         <div><b>${st.avgMs != null ? Math.round(st.avgMs) + ' мс' : '—'}</b><span>средняя за ${RANGE === 24 ? 'сутки' : 'неделю'}</span></div>
-        <div><b>${st.lastSp ? st.lastSp[k].mbps + ' Мбит/с' : '—'}</b><span>скорость ${st.lastSp ? '· ' + fmtAgo(now - st.lastSp.t) : '(раз в 3 ч)'}</span></div>
+        <div><b>${st.lastSp ? st.lastSp[k].mbps + ' Мбит/с' : '—'}</b><span>скорость ${st.lastSp ? '· ' + fmtAgo(now - st.lastSp.t) : '(раз в час)'}</span></div>
         <div><b style="color:${st.avail >= 99 ? C.green : st.avail >= 90 ? C.amber : C.red}">${st.avail}%</b><span>доступность</span></div>
       </div></div>`;
   };
@@ -151,9 +153,9 @@ function render() {
     <div class="tabs"><button data-r="24" class="${RANGE === 24 ? 'on' : ''}">24 часа</button><button data-r="168" class="${RANGE === 168 ? 'on' : ''}">7 дней</button></div>
     <div class="grid">${card('s1', 'Основной сервер', s1)}${card('s2', 'Резервный сервер', s2)}${relay}</div>
     <div class="grid charts">
-      <div class="card"><h3>Задержка через VPN, мс</h3><div class="sub">полный запрос Москва → сервер → сайт; ниже — лучше</div><canvas id="c1"></canvas></div>
-      <div class="card"><h3>Скорость скачивания, Мбит/с</h3><div class="sub">замер раз в 3 часа</div><canvas id="c2"></canvas></div>
-      <div class="card"><h3>Нагрузка на сервер в Москве, %</h3><div class="sub">процессор и «отбор» лимитом облака</div><canvas id="c3"></canvas></div>
+      <div class="card"><h3>Задержка через VPN, мс</h3><div class="sub">полный запрос Москва → сервер → сайт; ниже — лучше</div><div class="chart" id="c1"></div></div>
+      <div class="card"><h3>Скорость скачивания, Мбит/с</h3><div class="sub">замер раз в час</div><div class="chart" id="c2"></div></div>
+      <div class="card"><h3>Нагрузка на сервер в Москве, %</h3><div class="sub">процессор и «отбор» лимитом облака</div><div class="chart" id="c3"></div></div>
       <div class="card"><h3>События</h3><div class="sub">переключения и сбои за период</div>
         ${ev.length ? `<ul class="ev">${ev.slice(0, 12).map(e => `<li><time>${fmtT(e[0], true)}</time><span>${e[1]}</span></li>`).join('')}</ul>` : '<div class="empty">Сбоев не было 👍</div>'}</div>
     </div>
@@ -162,26 +164,47 @@ function render() {
   drawCharts(R);
 }
 
-function drawCharts(R) {
-  charts.forEach(c => c.destroy()); charts = [];
-  const days = RANGE > 24;
-  const xs = {type: 'linear', min: Date.now() - RANGE*3600e3, max: Date.now(),
-    ticks: {color: C.mute, maxTicksLimit: days ? 7 : 6, callback: v => days ? fmtT(v/1000, true).slice(0, 5) : fmtT(v/1000, false)},
-    grid: {color: C.line}};
-  const ys = (extra) => Object.assign({beginAtZero: true, ticks: {color: C.mute}, grid: {color: C.line}}, extra || {});
-  const base = {responsive: true, maintainAspectRatio: false, animation: false, interaction: {mode: 'nearest', intersect: false},
-    plugins: {legend: {labels: {color: '#c9d4e2', boxWidth: 12}}, tooltip: {callbacks: {title: it => fmtT(it[0].parsed.x/1000, true)}}}};
-  const line = (label, color, data, opt) => Object.assign({label, data, borderColor: color, backgroundColor: color + '33', borderWidth: 2, pointRadius: 0, tension: .25, spanGaps: false}, opt || {});
-  const ser = (k, f) => R.filter(p => p[k] !== undefined).map(p => ({x: p.t*1000, y: p[k] ? f(p[k]) : null}));
-  charts.push(new Chart($('#c1'), {type: 'line', options: Object.assign({}, base, {scales: {x: xs, y: ys()}}),
-    data: {datasets: [line('Основной', C.green, ser('s1', v => v.ok ? v.ms : null)), line('Резерв', C.purple, ser('s2', v => v.ok ? v.ms : null))]}}));
-  const sp = k => R.filter(p => p[k] && p[k].mbps != null).map(p => ({x: p.t*1000, y: p[k].mbps}));
-  charts.push(new Chart($('#c2'), {type: 'line', options: Object.assign({}, base, {scales: {x: xs, y: ys()}}),
-    data: {datasets: [line('Основной', C.green, sp('s1'), {pointRadius: 3, spanGaps: true}), line('Резерв', C.purple, sp('s2'), {pointRadius: 3, spanGaps: true})]}}));
-  const rl = k => R.map(p => ({x: p.t*1000, y: p[k]}));
-  charts.push(new Chart($('#c3'), {type: 'line', options: Object.assign({}, base, {scales: {x: xs, y: ys({suggestedMax: 30})}}),
-    data: {datasets: [line('Процессор', C.blue, rl('cpu'), {fill: true}), line('Отбор лимитом (steal)', C.amber, rl('steal'))]}}));
+function svgChart(id, sets, opt) {
+  opt = opt || {};
+  const host = $('#' + id), W = Math.max(host.clientWidth, 280), H = 230, pl = 38, pr = 8, pt = 8, pb = 24;
+  const days = RANGE > 24, x1 = Date.now()/1000, x0 = x1 - RANGE*3600;
+  const ys = sets.flatMap(s => s.pts.map(p => p.y)).filter(v => v != null);
+  let top = Math.max(opt.min || 0, ...ys, 1) * 1.12;
+  const step = [1,2,5,10,20,25,50,100,200,250,500,1000].find(v => top/v <= 5) || 1000; top = Math.ceil(top/step)*step;
+  const X = t => pl + (t - x0) / (x1 - x0) * (W - pl - pr), Y = v => pt + (1 - v/top) * (H - pt - pb);
+  let g = '';
+  for (let v = 0; v <= top; v += step) g += `<line x1="${pl}" x2="${W-pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="${C.line}"/><text x="${pl-6}" y="${Y(v)+4}" fill="${C.mute}" font-size="11" text-anchor="end">${v}</text>`;
+  const nx = W < 420 ? 4 : 6;
+  for (let i = 0; i <= nx; i++) { const t = x0 + (x1-x0)*i/nx;
+    g += `<text x="${X(t)}" y="${H-6}" fill="${C.mute}" font-size="11" text-anchor="${i === 0 ? 'start' : i === nx ? 'end' : 'middle'}">${days ? fmtT(t, true).slice(0,5) : fmtT(t)}</text>`; }
+  for (const s of sets) {
+    const pts = s.pts.filter(p => p.x >= x0);
+    let segs = [], cur = [];
+    for (const p of pts) { if (p.y == null) { if (!s.span && cur.length) { segs.push(cur); cur = []; } } else cur.push(p); }
+    if (cur.length) segs.push(cur);
+    for (const sg of segs) {
+      const d = sg.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join('');
+      if (s.fill && sg.length > 1) g += `<path d="${d}L${X(sg[sg.length-1].x)},${Y(0)}L${X(sg[0].x)},${Y(0)}Z" fill="${s.color}22"/>`;
+      g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+      if (s.dots || sg.length === 1) g += sg.map(p => `<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="3" fill="${s.color}"><title>${fmtT(p.x, true)} — ${p.y}</title></circle>`).join('');
+    }
+  }
+  const lg = `<div class="lg">${sets.map(s => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('')}</div>`;
+  host.innerHTML = lg + `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>`;
 }
+
+function drawCharts(R) {
+  const ser = (k, f) => R.filter(p => p[k] !== undefined).map(p => ({x: p.t, y: p[k] ? f(p[k]) : null}));
+  svgChart('c1', [{label: 'Основной', color: C.green, pts: ser('s1', v => v.ok ? v.ms : null)},
+                  {label: 'Резерв', color: C.purple, pts: ser('s2', v => v.ok ? v.ms : null)}], {min: 100});
+  const sp = k => R.filter(p => p[k] && p[k].mbps != null).map(p => ({x: p.t, y: p[k].mbps}));
+  svgChart('c2', [{label: 'Основной', color: C.green, pts: sp('s1'), span: true, dots: true},
+                  {label: 'Резерв', color: C.purple, pts: sp('s2'), span: true, dots: true}], {min: 50});
+  const rl = k => R.map(p => ({x: p.t, y: p[k]}));
+  svgChart('c3', [{label: 'Процессор', color: C.blue, pts: rl('cpu'), fill: true},
+                  {label: 'Отбор лимитом (steal)', color: C.amber, pts: rl('steal')}], {min: 20});
+}
+window.addEventListener('resize', () => { if (DATA) render(); });
 
 load();
 setInterval(load, 5*60*1000);
