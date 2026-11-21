@@ -184,13 +184,30 @@ PT=$(jq -nc --argjson s "$S" --argjson cpu "$CPU" --argjson st "$STEAL" --argjso
 [ -s "$HIST" ] || echo '[]' > "$HIST"
 jq --argjson p "$PT" --argjson k $KEEP '(. + [$p]) | if length > $k then .[length-$k:] else . end' "$HIST" > "$HIST.new" && mv "$HIST.new" "$HIST"
 
-jq -n --slurpfile h "$HIST" --slurpfile svc "$ST/svc.json" --slurpfile mon "$ST/month.json" \
+# сводки по часам (31 день) и по дням (год) — для срезов «месяц» и «год»
+AGG='def avg: if length > 0 then add / length else null end;
+  def srv($a): ($a | map(select(.))) as $v | if ($v|length) == 0 then null else
+    {up: ($v | map(if .ok then 1 else 0 end) | avg), ms: ($v | map(.ms) | map(select(.)) | avg | if . then round else null end),
+     mbps: ($v | map(.mbps) | map(select(.)) | avg | if . then round else null end), place: $v[-1].place} | .ok = (.up >= 0.5) end;
+  def ag($pts; $start): {t: $start, s1: srv($pts | map(.s1)), s2: srv($pts | map(.s2)),
+    cpu: ($pts | map(.cpu) | map(select(.)) | avg | if . then round else null end),
+    steal: ($pts | map(.steal) | map(select(.)) | avg | if . then round else null end),
+    mem: ($pts | map(.mem) | map(select(.)) | avg | if . then round else null end),
+    conns: ($pts | map(.conns) | max),
+    tr: ($pts | map(.tr // {}) | reduce .[] as $x ({}; reduce ($x | to_entries[]) as $e (.; .[$e.key] = ((.[$e.key] // 0) + $e.value))) | map_values(. * 10 | round / 10))};
+  def upsert($pts; $b; $off; $keep): ((now + $off) / $b | floor) as $k | ($k * $b - $off) as $start
+    | (map(select(.t != $start)) + [ag($pts | map(select(((.t + $off) / $b | floor) == $k)); $start)]) | sort_by(.t) | .[-$keep:];'
+for f in hourly daily; do [ -s "$ST/$f.json" ] || echo '[]' > "$ST/$f.json"; done
+jq --slurpfile h "$HIST" "$AGG"' upsert($h[0]; 3600; 0; 744)' "$ST/hourly.json" > "$ST/hourly.new" && mv "$ST/hourly.new" "$ST/hourly.json"
+jq --slurpfile h "$HIST" "$AGG"' upsert($h[0]; 86400; 10800; 400)' "$ST/daily.json" > "$ST/daily.new" && mv "$ST/daily.new" "$ST/daily.json"
+
+jq -n --slurpfile h "$HIST" --slurpfile hr "$ST/hourly.json" --slurpfile dy "$ST/daily.json" --slurpfile svc "$ST/svc.json" --slurpfile mon "$ST/month.json" \
   --slurpfile doc <(cat "$ST/doctor.json" 2>/dev/null || echo null) \
   --argjson xr "$XR" --argjson up "$UP" --argjson rb "$RB" --argjson ua "${UPD_ALL:-0}" --argjson us "${UPD_SEC:-0}" \
   --argjson bk "$BK_T" --argjson cfg "${CFG_T:-0}" --arg mon "$(systemctl is-active vpn-monitor.timer 2>/dev/null)" \
-  '{version: 2, updated: now|floor, every_min: 15,
+  '{version: 3, updated: now|floor, every_min: 15,
     relay: {xray: $xr, uptime_h: $up, monitor: ($mon == "active"), reboot: $rb, updates: $ua, security: $us,
             backup_t: $bk, config_t: $cfg, doctor: $doc[0]},
-    services: $svc[0], month: $mon[0], points: $h[0]}' > "$ST/out.json"
+    services: $svc[0], month: $mon[0], points: $h[0], hourly: $hr[0], daily: $dy[0]}' > "$ST/out.json"
 jq -n --rawfile c "$ST/out.json" '{files: {"vpn-status.json": {content: $c}}}' > "$ST/p.json"
 gh PATCH "/gists/$GIST_ID" "$ST/p.json" >/dev/null && echo "Отправлено ($(jq '.points|length' "$ST/out.json") точек)" || echo "Не удалось отправить в GitHub"

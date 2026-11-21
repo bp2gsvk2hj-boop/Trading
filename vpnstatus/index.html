@@ -111,17 +111,23 @@ async function load() {
 function serverStats(pts, k) {
   const v = pts.map(p => p[k]).filter(Boolean);
   if (!v.length) return null;
-  const ok = v.filter(x => x.ok), ms = ok.map(x => x.ms).filter(x => x != null);
+  const ok = v.filter(x => x.ok), ms = ok.map(x => x.ms).filter(x => x != null), up = avg(v.map(x => x.up != null ? x.up : (x.ok ? 1 : 0)));
   const sp = pts.filter(p => p[k] && p[k].mbps != null);
   const lastSp = sp.length ? sp[sp.length-1] : null;
-  return { now: v[v.length-1], avail: Math.round(ok.length*100/v.length), avgMs: avg(ms), lastSp };
+  return { now: v[v.length-1], avail: Math.round(up*1000)/10, avgMs: avg(ms), lastSp };
 }
 
 function render() {
   const now = Date.now()/1000, D = DATA, P = D.points, last = P[P.length-1];
   const age = now - D.updated, stale = age > (D.every_min || 15) * 60 * 2.7;
-  const from = now - RANGE*3600, R = P.filter(p => p.t >= from);
+  const src = RANGE > 168 ? (RANGE > 744 ? D.daily : D.hourly) : null;
+  const STEP = RANGE > 744 ? 86400 : RANGE > 168 ? 3600 : (D.every_min || 15) * 60;
+  const from = now - RANGE*3600, R = ((src && src.length) ? src : P).filter(p => p.t >= from);
+  const RL = {24: 'сутки', 168: 'неделю', 720: 'месяц', 8760: 'год'}[RANGE];
   const s1 = serverStats(R, 's1'), s2 = serverStats(R, 's2');
+  if (s1) s1.now = last.s1 || s1.now; if (s2) s2.now = last.s2 || s2.now;
+  const spF = k => { const a = P.filter(p => p[k] && p[k].mbps != null); return a.length ? a[a.length-1] : null; };
+  if (s1) s1.lastSp = spF('s1') || s1.lastSp; if (s2) s2.lastSp = spF('s2') || s2.lastSp;
 
   let col, title, sub;
   if (stale) { col = C.grey; title = 'Нет свежих данных'; sub = `Сервер в Москве не выходил на связь ${fmtAgo(age)} — возможно, он недоступен. Запустите vpn-doctor.sh.`; }
@@ -137,9 +143,9 @@ function render() {
       <div class="sub">${n.place || 'зарубежный сервер'}</div>
       <div class="kv">
         <div><b>${n.ms != null ? n.ms + ' мс' : '—'}</b><span>задержка сейчас</span></div>
-        <div><b>${st.avgMs != null ? Math.round(st.avgMs) + ' мс' : '—'}</b><span>средняя за ${RANGE === 24 ? 'сутки' : 'неделю'}</span></div>
+        <div><b>${st.avgMs != null ? Math.round(st.avgMs) + ' мс' : '—'}</b><span>средняя за ${RL}</span></div>
         <div><b>${st.lastSp ? st.lastSp[k].mbps + ' Мбит/с' : '—'}</b><span>скорость ${st.lastSp ? '· ' + fmtAgo(now - st.lastSp.t) : '(раз в час)'}</span></div>
-        <div><b style="color:${st.avail >= 99 ? C.green : st.avail >= 90 ? C.amber : C.red}">${st.avail}%</b><span>доступность</span></div>
+        <div><b style="color:${st.avail >= 99 ? C.green : st.avail >= 90 ? C.amber : C.red}">${st.avail >= 99.95 ? 100 : st.avail}%</b><span>доступность</span></div>
       </div>${svcChips(k)}</div>`;
   };
   const svcChips = k => {
@@ -158,7 +164,7 @@ function render() {
         <div><b>${last.conns ?? '—'}</b><span>устройств через приложение</span></div>
         <div><b>${last.cpu != null ? last.cpu + '%' : '—'}</b><span>процессор сейчас${cpuA != null ? ' · ср. ' + Math.round(cpuA) + '%' : ''}</span></div>
         <div><b>${last.mem}%</b><span>память</span></div>
-        <div><b>${fmtMB(traffic)}</b><span>трафик за ${RANGE === 24 ? 'сутки' : 'неделю'}</span></div>
+        <div><b>${fmtMB(traffic)}</b><span>трафик за ${RL}</span></div>
       </div>${maint()}</div>`;
 
   function maint() {
@@ -180,7 +186,7 @@ function render() {
   const tDir = [['Российские сайты — напрямую', tsum('direct'), C.amber], ['Через основной сервер', tsum('f1'), C.green], ['Через резерв', tsum('f2'), C.purple]];
   const tDev = [['Приложение (телефон, планшет)', tsum('app'), C.blue], ['Домашний роутер', tsum('router'), '#38b2ac']];
   const dirT = tDir.reduce((a, x) => a + x[1], 0), devT = tDev.reduce((a, x) => a + x[1], 0);
-  const trafficCard = dirT + devT > 0 ? `<div class="card"><h3>Трафик за ${RANGE === 24 ? 'сутки' : 'неделю'}</h3><div class="sub">всего ${fmtMB(devT || dirT)} · без служебных замеров</div>
+  const trafficCard = dirT + devT > 0 ? `<div class="card"><h3>Трафик за ${RL}</h3><div class="sub">всего ${fmtMB(devT || dirT)} · без служебных замеров</div>
       <div class="sec">куда</div>${bars(tDir, dirT)}<div class="sec">с каких устройств</div>${bars(tDev, devT)}</div>`
     : `<div class="card"><h3>Трафик</h3><div class="sub">данные появятся после первых замеров</div></div>`;
 
@@ -202,19 +208,19 @@ function render() {
     const a = R[i-1][k], b = R[i][k];
     if (a && b && a.ok !== b.ok) ev.push([R[i].t, b.ok ? `🟢 ${nm} снова доступен` : `🔴 ${nm} недоступен`]);
   }
-  for (let i = 1; i < R.length; i++) if (R[i].t - R[i-1].t > (D.every_min || 15) * 60 * 2.7)
+  if (STEP < 3600) for (let i = 1; i < R.length; i++) if (R[i].t - R[i-1].t > STEP * 2.7)
     ev.push([R[i].t, `⚪ Пропуск данных ${Math.round((R[i].t - R[i-1].t)/60)} мин (сервер в Москве был недоступен или перезагружался)`]);
   ev.sort((a, b) => b[0] - a[0]);
 
   $('#app').innerHTML = `
     <header><h1>VPN · состояние</h1><span class="upd">обновлено ${fmtAgo(age)} · ${fmtT(D.updated, true)}</span></header>
     <div class="hero"><span class="dot" style="background:${col}"></span><div><div class="t">${title}</div><div class="s">${sub}</div></div></div>
-    <div class="tabs"><button data-r="24" class="${RANGE === 24 ? 'on' : ''}">24 часа</button><button data-r="168" class="${RANGE === 168 ? 'on' : ''}">7 дней</button></div>
+    <div class="tabs">${[[24, 'Сутки'], [168, 'Неделя'], [720, 'Месяц'], [8760, 'Год']].map(([r, n]) => `<button data-r="${r}" class="${RANGE === r ? 'on' : ''}">${n}</button>`).join('')}</div>
     <div class="grid">${card('s1', 'Основной сервер', s1)}${card('s2', 'Резервный сервер', s2)}${relay}</div>
     <div class="grid">${trafficCard}${monthCard}</div>
     <div class="grid charts">
       <div class="card"><h3>Задержка через VPN, мс</h3><div class="sub">полный запрос Москва → сервер → сайт; ниже — лучше</div><div class="chart" id="c1"></div></div>
-      <div class="card"><h3>Скорость скачивания, Мбит/с</h3><div class="sub">замер раз в час</div><div class="chart" id="c2"></div></div>
+      <div class="card"><h3>Скорость скачивания, Мбит/с</h3><div class="sub">${RANGE > 168 ? 'среднее по замерам раз в час' : 'замер раз в час'}</div><div class="chart" id="c2"></div></div>
       <div class="card"><h3>Нагрузка на сервер в Москве, %</h3><div class="sub">процессор и «отбор» лимитом облака</div><div class="chart" id="c3"></div></div>
       <div class="card"><h3>События</h3><div class="sub">переключения и сбои за период</div>
         ${ev.length ? `<ul class="ev">${ev.slice(0, 12).map(e => `<li><time>${fmtT(e[0], true)}</time><span>${e[1]}</span></li>`).join('')}</ul>` : '<div class="empty">Сбоев не было 👍</div>'}</div>
@@ -236,7 +242,7 @@ function svgChart(id, sets, opt) {
   for (let v = 0; v <= top; v += step) g += `<line x1="${pl}" x2="${W-pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="${C.line}"/><text x="${pl-6}" y="${Y(v)+4}" fill="${C.mute}" font-size="11" text-anchor="end">${v}</text>`;
   const nx = W < 420 ? 4 : 6;
   for (let i = 0; i <= nx; i++) { const t = x0 + (x1-x0)*i/nx;
-    g += `<text x="${X(t)}" y="${H-6}" fill="${C.mute}" font-size="11" text-anchor="${i === 0 ? 'start' : i === nx ? 'end' : 'middle'}">${days ? fmtT(t, true).slice(0,5) : fmtT(t)}</text>`; }
+    g += `<text x="${X(t)}" y="${H-6}" fill="${C.mute}" font-size="11" text-anchor="${i === 0 ? 'start' : i === nx ? 'end' : 'middle'}">${RANGE > 744 ? MONTHS[new Date(t*1000).getMonth()].slice(0,3) : days ? fmtT(t, true).slice(0,5) : fmtT(t)}</text>`; }
   for (const s of sets) {
     const pts = s.pts.filter(p => p.x >= x0);
     let segs = [], cur = [];
@@ -258,8 +264,8 @@ function drawCharts(R) {
   svgChart('c1', [{label: 'Основной', color: C.green, pts: ser('s1', v => v.ok ? v.ms : null)},
                   {label: 'Резерв', color: C.purple, pts: ser('s2', v => v.ok ? v.ms : null)}], {min: 100});
   const sp = k => R.filter(p => p[k] && p[k].mbps != null).map(p => ({x: p.t, y: p[k].mbps}));
-  svgChart('c2', [{label: 'Основной', color: C.green, pts: sp('s1'), span: true, dots: true},
-                  {label: 'Резерв', color: C.purple, pts: sp('s2'), span: true, dots: true}], {min: 50});
+  svgChart('c2', [{label: 'Основной', color: C.green, pts: sp('s1'), span: true, dots: RANGE <= 168},
+                  {label: 'Резерв', color: C.purple, pts: sp('s2'), span: true, dots: RANGE <= 168}], {min: 50});
   const rl = k => R.map(p => ({x: p.t, y: p[k]}));
   svgChart('c3', [{label: 'Процессор', color: C.blue, pts: rl('cpu'), fill: true},
                   {label: 'Отбор лимитом (steal)', color: C.amber, pts: rl('steal')}], {min: 20});
