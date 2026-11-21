@@ -119,7 +119,7 @@ elif [ $FIXED -ge $BAD ]; then log "🟡 Найдено проблем: $BAD, в
 else log "🔴 Проблем: $BAD, починено: $FIXED. Пришлите этот отчёт Claude."; fi
 log "Отчёт: $REP"
 
-if [ -n "${TG_TOKEN:-}" ] && [ -n "${TG_CHAT:-}" ]; then
+if [ -z "${NO_TG:-}" ] && [ -n "${TG_TOKEN:-}" ] && [ -n "${TG_CHAT:-}" ]; then
   TXT=$(clean < "$REP" | head -c 3900)
   for via in socks5h://127.0.0.1:10810 ""; do
     curl -s -m 20 ${via:+-x "$via"} "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \

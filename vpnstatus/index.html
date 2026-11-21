@@ -45,6 +45,17 @@
   .ev li:first-child{border-top:0}
   .ev time{color:var(--mute);min-width:112px;font-variant-numeric:tabular-nums}
   .empty{color:var(--mute);font-size:14px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  .chip{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--card2)}
+  .rows{margin-top:12px;display:grid;gap:7px;font-size:13.5px}
+  .rows div{display:flex;gap:8px;align-items:flex-start}
+  .rows small{color:var(--mute)}
+  .bar{margin:8px 0 12px}
+  .bar .h{display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:5px}
+  .bar .h span{color:var(--mute);font-variant-numeric:tabular-nums}
+  .bar .tr{height:9px;border-radius:6px;background:var(--card2);overflow:hidden}
+  .bar .tr i{display:block;height:100%;border-radius:6px}
+  .sec{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute);margin:6px 0 2px}
   footer{color:var(--mute);font-size:12px;margin-top:18px;text-align:center}
   .setup{max-width:520px;margin:12vh auto;text-align:center}
   .setup input{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;margin:12px 0}
@@ -65,6 +76,12 @@ const fmtAgo = s => s < 90 ? 'только что' : s < 3600 ? `${Math.round(s/
 const two = n => String(n).padStart(2, '0');
 const fmtT = (t, d) => { const x = new Date(t*1000); return d ? `${two(x.getDate())}.${two(x.getMonth()+1)} ${two(x.getHours())}:${two(x.getMinutes())}` : `${two(x.getHours())}:${two(x.getMinutes())}`; };
 const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+const fmtMB = mb => mb >= 1024 ? (mb/1024).toFixed(mb >= 10240 ? 0 : 1) + ' ГБ' : Math.round(mb) + ' МБ';
+const ptTraffic = p => p.tr ? (p.tr.app || 0) + (p.tr.router || 0) : (p.rx || 0) + (p.tx || 0);
+const SVC = {youtube: 'YouTube', chatgpt: 'ChatGPT', instagram: 'Instagram', telegram: 'Telegram', netflix: 'Netflix', google: 'Google'};
+const MONTHS = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+const bars = (items, total) => items.map(([n, v, c]) => `<div class="bar"><div class="h">${n}<span>${fmtMB(v)} · ${total ? Math.round(v*100/total) : 0}%</span></div>
+  <div class="tr"><i style="width:${total ? Math.max(v*100/total, v > 0 ? 1.5 : 0) : 0}%;background:${c}"></i></div></div>`).join('');
 
 function setup(msg) {
   $('#app').innerHTML = `<div class="setup"><h1>VPN · состояние</h1>
@@ -123,9 +140,16 @@ function render() {
         <div><b>${st.avgMs != null ? Math.round(st.avgMs) + ' мс' : '—'}</b><span>средняя за ${RANGE === 24 ? 'сутки' : 'неделю'}</span></div>
         <div><b>${st.lastSp ? st.lastSp[k].mbps + ' Мбит/с' : '—'}</b><span>скорость ${st.lastSp ? '· ' + fmtAgo(now - st.lastSp.t) : '(раз в час)'}</span></div>
         <div><b style="color:${st.avail >= 99 ? C.green : st.avail >= 90 ? C.amber : C.red}">${st.avail}%</b><span>доступность</span></div>
-      </div></div>`;
+      </div>${svcChips(k)}</div>`;
   };
-  const traffic = R.reduce((a, p) => a + (p.rx || 0) + (p.tx || 0), 0);
+  const svcChips = k => {
+    const v = D.services && D.services[k]; if (!v || !v.res) return '';
+    return `<div class="chips">${Object.keys(SVC).filter(n => n in v.res).map(n => { const c = v.res[n];
+      const [col, t] = c >= 200 && c < 400 ? [C.green, '✓'] : (c === 403 || c === 451) ? [C.red, '✗ блок'] : [C.amber, '?'];
+      return `<span class="chip" style="color:${col}" title="код ${c}">${SVC[n]} ${t}</span>`; }).join('')}
+      <span class="chip" style="color:${C.mute}">проверено ${fmtAgo(now - v.t)}</span></div>`;
+  };
+  const traffic = R.reduce((a, p) => a + ptTraffic(p), 0);
   const cpuA = avg(R.map(p => p.cpu).filter(x => x != null));
   const relay = `<div class="card"><h3><span class="dot" style="width:11px;height:11px;background:${stale ? C.grey : D.relay.xray ? C.green : C.red}"></span>Сервер в Москве
       <span class="badge" style="background:${C.blue}22;color:${C.blue}">вход</span></h3>
@@ -134,8 +158,43 @@ function render() {
         <div><b>${last.conns ?? '—'}</b><span>устройств через приложение</span></div>
         <div><b>${last.cpu != null ? last.cpu + '%' : '—'}</b><span>процессор сейчас${cpuA != null ? ' · ср. ' + Math.round(cpuA) + '%' : ''}</span></div>
         <div><b>${last.mem}%</b><span>память</span></div>
-        <div><b>${traffic >= 1024 ? (traffic/1024).toFixed(1) + ' ГБ' : traffic + ' МБ'}</b><span>трафик за ${RANGE === 24 ? 'сутки' : 'неделю'}</span></div>
-      </div></div>`;
+        <div><b>${fmtMB(traffic)}</b><span>трафик за ${RANGE === 24 ? 'сутки' : 'неделю'}</span></div>
+      </div>${maint()}</div>`;
+
+  function maint() {
+    const r = D.relay || {}, rows = [];
+    if (r.reboot !== undefined) rows.push(r.reboot ? ['⚠️', 'Нужна перезагрузка', 'установлено обновление ядра — <code>reboot</code>, когда VPN не нужен'] : ['✅', 'Перезагрузка не нужна']);
+    if (r.updates !== undefined) rows.push(r.updates ? [r.security ? '🛡️' : '📦', `Обновлений: ${r.updates}`, r.security ? `из них безопасности: ${r.security}` : ''] : ['✅', 'Система обновлена']);
+    if (r.backup_t !== undefined) {
+      if (!r.backup_t) rows.push(['⚠️', 'Резервной копии нет', '<code>NOPASS=1 bash backup.sh</code>']);
+      else if (r.config_t > r.backup_t) rows.push(['⚠️', `Копия устарела (${fmtAgo(now - r.backup_t)})`, 'после неё менялись настройки — сделайте новую']);
+      else rows.push(['💾', `Резервная копия: ${fmtAgo(now - r.backup_t)}`, 'актуальна']);
+    }
+    const dc = r.doctor;
+    if (dc) rows.push(dc.bad ? ['🔴', `Диагностика: проблем ${dc.bad}`, dc.issues.slice(0, 3).join('; ')] : ['🟢', `Диагностика: всё в порядке (${dc.ok})`, fmtAgo(now - dc.t)]);
+    return rows.length ? `<div class="rows">${rows.map(([i, t, s]) => `<div><span>${i}</span><span>${t}${s ? `<br><small>${s}</small>` : ''}</span></div>`).join('')}</div>` : '';
+  }
+
+  // трафик по направлениям и устройствам
+  const tsum = k => R.reduce((a, p) => a + (p.tr && p.tr[k] || 0), 0);
+  const tDir = [['Российские сайты — напрямую', tsum('direct'), C.amber], ['Через основной сервер', tsum('f1'), C.green], ['Через резерв', tsum('f2'), C.purple]];
+  const tDev = [['Приложение (телефон, планшет)', tsum('app'), C.blue], ['Домашний роутер', tsum('router'), '#38b2ac']];
+  const dirT = tDir.reduce((a, x) => a + x[1], 0), devT = tDev.reduce((a, x) => a + x[1], 0);
+  const trafficCard = dirT + devT > 0 ? `<div class="card"><h3>Трафик за ${RANGE === 24 ? 'сутки' : 'неделю'}</h3><div class="sub">всего ${fmtMB(devT || dirT)} · без служебных замеров</div>
+      <div class="sec">куда</div>${bars(tDir, dirT)}<div class="sec">с каких устройств</div>${bars(tDev, devT)}</div>`
+    : `<div class="card"><h3>Трафик</h3><div class="sub">данные появятся после первых замеров</div></div>`;
+
+  // месяц
+  const mo = D.month && D.month.cur;
+  const monthLine = (m, lbl) => {
+    const pc = x => x && x.n ? (x.ok*100/x.n) : null, tr = m.tr || {}, tot = (tr.app || 0) + (tr.router || 0);
+    const cell = (n, v) => `<div><b style="color:${v == null ? C.mute : v >= 99.5 ? C.green : v >= 97 ? C.amber : C.red}">${v == null ? '—' : v.toFixed(v >= 99.95 ? 0 : 1) + '%'}</b><span>${n}</span></div>`;
+    return `<div class="sec">${lbl}</div><div class="kv">${cell('основной сервер', pc(m.s1))}${cell('резервный сервер', pc(m.s2))}
+      <div><b>${fmtMB(tot)}</b><span>трафик</span></div><div><b>${fmtMB(tr.direct || 0)}</b><span>из них напрямую в РФ</span></div></div>`;
+  };
+  const mName = m => { const [y, mm] = m.split('-'); return `${MONTHS[+mm - 1]} ${y}`; };
+  const monthCard = mo ? `<div class="card"><h3>Доступность за месяц</h3><div class="sub">доля успешных проверок раз в 15 минут</div>
+      ${monthLine(mo, mName(mo.m))}${D.month.prev ? '<div style="height:10px"></div>' + monthLine(D.month.prev, mName(D.month.prev.m)) : ''}</div>` : '';
 
   // события: смены доступности
   const ev = [];
@@ -152,6 +211,7 @@ function render() {
     <div class="hero"><span class="dot" style="background:${col}"></span><div><div class="t">${title}</div><div class="s">${sub}</div></div></div>
     <div class="tabs"><button data-r="24" class="${RANGE === 24 ? 'on' : ''}">24 часа</button><button data-r="168" class="${RANGE === 168 ? 'on' : ''}">7 дней</button></div>
     <div class="grid">${card('s1', 'Основной сервер', s1)}${card('s2', 'Резервный сервер', s2)}${relay}</div>
+    <div class="grid">${trafficCard}${monthCard}</div>
     <div class="grid charts">
       <div class="card"><h3>Задержка через VPN, мс</h3><div class="sub">полный запрос Москва → сервер → сайт; ниже — лучше</div><div class="chart" id="c1"></div></div>
       <div class="card"><h3>Скорость скачивания, Мбит/с</h3><div class="sub">замер раз в час</div><div class="chart" id="c2"></div></div>
