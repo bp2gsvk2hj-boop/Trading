@@ -254,11 +254,11 @@ WantedBy=timers.target
 EOT
 cat > /etc/systemd/system/trading-robot-news.timer <<'EOT'
 [Unit]
-Description=Дайджест брокерского рынка (09:00 и 18:00 МСК)
+Description=Дайджест брокерского рынка (пн–пт, 09:00 и 18:00 МСК)
 
 [Timer]
-OnCalendar=*-*-* 09:00:00 Europe/Moscow
-OnCalendar=*-*-* 18:00:00 Europe/Moscow
+OnCalendar=Mon..Fri *-*-* 09:00:00 Europe/Moscow
+OnCalendar=Mon..Fri *-*-* 18:00:00 Europe/Moscow
 Unit=trading-robot@news.service
 Persistent=true
 

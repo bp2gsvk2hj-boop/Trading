@@ -878,8 +878,17 @@ def cmd_run(hours: int | None, dry_run: bool, web: Path | None) -> int:
         store.close()
 
 
+def weekend_skip(cfg: dict, now: datetime) -> bool:
+    """Плановый запуск в субботу или воскресенье (МСК) — пропустить. last_run не трогаем,
+    поэтому выпуск понедельника соберёт всё с вечера пятницы."""
+    return bool(cfg.get("digest", {}).get("weekdays_only", True)) and now.astimezone(MSK).weekday() >= 5
+
+
 def _run(store: "Store", hours: int | None, dry_run: bool, web: Path | None) -> int:
     cfg = load_config()
+    if hours is None and not dry_run and weekend_skip(cfg, datetime.now(timezone.utc)):
+        log("info", "выходной — выпуск не отправляю, новости войдут в выпуск понедельника")
+        return 0
     matcher = Matcher(cfg)
     net = Net()
     now = datetime.now(timezone.utc)

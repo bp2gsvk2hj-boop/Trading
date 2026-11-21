@@ -304,6 +304,16 @@ class Run(unittest.TestCase):
                 self.assertIn("@frank_media: не загружается 2", net.sent[2]["text"])
                 self.assertNotIn("не читаются", net.sent[2]["text"])
 
+    def test_weekend_skip(self):
+        cfg = {"digest": {"weekdays_only": True}}
+        sat = datetime(2026, 11, 21, 6, tzinfo=timezone.utc)          # Saturday 09:00 MSK
+        fri = datetime(2026, 11, 20, 15, tzinfo=timezone.utc)         # Friday 18:00 MSK
+        sun_night = datetime(2026, 11, 22, 21, 30, tzinfo=timezone.utc)  # Monday 00:30 MSK
+        self.assertTrue(m.weekend_skip(cfg, sat))
+        self.assertFalse(m.weekend_skip(cfg, fri))
+        self.assertFalse(m.weekend_skip(cfg, sun_night))
+        self.assertFalse(m.weekend_skip({"digest": {"weekdays_only": False}}, sat))
+
     def test_recipients(self):
         with unittest.mock.patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "1", "BROKERNEWS_CHAT_IDS": ""}):
             self.assertEqual(m.news_chats(), ["1"])
