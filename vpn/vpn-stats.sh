@@ -37,7 +37,7 @@ gh() {  # $1 метод, $2 путь, $3 тело — сначала напря�
 # ---------------- установка ----------------
 if [ "${1:-}" = install ]; then
   [ -n "${GH_TOKEN:-}" ] || { echo "Нужен токен: GH_TOKEN='ghp_…' bash vpn-stats.sh install"; exit 1; }
-  echo '[]' > "$HIST"
+  [ -s "$HIST" ] || echo '[]' > "$HIST"
   if [ -z "${GIST_ID:-}" ]; then
     jq -n '{description:"vpn status", public:false, files:{"vpn-status.json":{content:"{}"}}}' > "$ST/p.json"
     R=$(gh POST /gists "$ST/p.json") || { echo "Не удалось создать gist — проверьте токен (нужно право gist)"; exit 1; }
@@ -63,7 +63,7 @@ OnUnitActiveSec=15min
 WantedBy=timers.target
 EOF
   systemctl daemon-reload; systemctl enable --now vpn-stats.timer >/dev/null 2>&1
-  echo "Первый замер (около минуты)…"; rm -f "$ST/n"; /usr/local/bin/vpn-stats >/dev/null 2>&1
+  echo "Замер (около минуты)…"; /usr/local/bin/vpn-stats >/dev/null 2>&1
   echo; echo "Готово. Страница мониторинга (откройте и добавьте в закладки):"
   echo "${PAGE}#${GIST_ID}"; exit 0
 fi
