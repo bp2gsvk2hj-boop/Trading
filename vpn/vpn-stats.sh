@@ -153,6 +153,7 @@ echo "$TOT $BUSY $steal" > "$ST/cpu"
 MEM=$(free | awk '/Mem:/{printf "%.0f", ($2-$7)*100/$2}')
 CONN=$(ss -tnH state established '( sport = :443 )' | awk '{print $4}' | sed 's/:[0-9]*$//' | sort -u | wc -l)
 XR=$(systemctl is-active --quiet xray && echo true || echo false)
+DISK=$(df -P / | awk 'NR==2{print $5+0}')
 UP=$(awk '{printf "%.0f", $1/3600}' /proc/uptime)
 
 # обслуживание: перезагрузка, обновления, резервная копия, ежедневная диагностика
@@ -203,10 +204,10 @@ jq --slurpfile h "$HIST" "$AGG"' upsert($h[0]; 86400; 10800; 400)' "$ST/daily.js
 
 jq -n --slurpfile h "$HIST" --slurpfile hr "$ST/hourly.json" --slurpfile dy "$ST/daily.json" --slurpfile svc "$ST/svc.json" --slurpfile mon "$ST/month.json" \
   --slurpfile doc <(cat "$ST/doctor.json" 2>/dev/null || echo null) \
-  --argjson xr "$XR" --argjson up "$UP" --argjson rb "$RB" --argjson ua "${UPD_ALL:-0}" --argjson us "${UPD_SEC:-0}" \
+  --argjson xr "$XR" --argjson up "$UP" --argjson disk "${DISK:-0}" --argjson rb "$RB" --argjson ua "${UPD_ALL:-0}" --argjson us "${UPD_SEC:-0}" \
   --argjson bk "$BK_T" --argjson cfg "${CFG_T:-0}" --arg mon "$(systemctl is-active vpn-monitor.timer 2>/dev/null)" \
   '{version: 3, updated: now|floor, every_min: 15,
-    relay: {xray: $xr, uptime_h: $up, monitor: ($mon == "active"), reboot: $rb, updates: $ua, security: $us,
+    relay: {xray: $xr, uptime_h: $up, disk: $disk, monitor: ($mon == "active"), reboot: $rb, updates: $ua, security: $us,
             backup_t: $bk, config_t: $cfg, doctor: $doc[0]},
     services: $svc[0], month: $mon[0], points: $h[0], hourly: $hr[0], daily: $dy[0]}' > "$ST/out.json"
 jq -n --rawfile c "$ST/out.json" '{files: {"vpn-status.json": {content: $c}}}' > "$ST/p.json"

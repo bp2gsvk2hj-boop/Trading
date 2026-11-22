@@ -161,7 +161,7 @@ function render() {
       <span class="badge" style="background:${C.blue}22;color:${C.blue}">вход</span></h3>
       <div class="sub">работает ${D.relay.uptime_h >= 48 ? Math.round(D.relay.uptime_h/24) + ' дн' : D.relay.uptime_h + ' ч'} без перезагрузки · мониторинг ${D.relay.monitor ? 'включён' : 'выключен'}</div>
       <div class="kv">
-        <div><b>${last.conns ?? '—'}</b><span>устройств через приложение</span></div>
+        <div><b style="color:${(D.relay.disk || 0) >= 90 ? C.red : (D.relay.disk || 0) >= 75 ? C.amber : 'inherit'}">${D.relay.disk != null ? D.relay.disk + '%' : '—'}</b><span>диск занят</span></div>
         <div><b>${last.cpu != null ? last.cpu + '%' : '—'}</b><span>процессор сейчас${cpuA != null ? ' · ср. ' + Math.round(cpuA) + '%' : ''}</span></div>
         <div><b>${last.mem}%</b><span>память</span></div>
         <div><b>${fmtMB(traffic)}</b><span>трафик за ${RL}</span></div>
