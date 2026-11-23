@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0f1621">
+<title>Яндекс vs Selectel · тест</title>
+<style>
+  :root{--bg:#0f1621;--card:#172130;--card2:#1d2a3c;--line:#26354a;--text:#e8eef6;--mute:#8b9bb0;
+        --green:#34c37a;--amber:#f2b134;--red:#ef5d5d;--ya:#a37ef0;--sel:#4c9be8}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+       padding:calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 24px)}
+  .wrap{max-width:1100px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:22px;margin:0}
+  .upd,.mute{color:var(--mute);font-size:13px}
+  .prog{height:6px;border-radius:4px;background:var(--card2);overflow:hidden;margin:10px 0 16px}
+  .prog i{display:block;height:100%;background:var(--sel)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px 18px}
+  .card h3{margin:0 0 2px;font-size:16px;display:flex;align-items:center;gap:8px}
+  .card .sub{color:var(--mute);font-size:13px;margin-bottom:10px}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:3px}
+  table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+  th,td{padding:8px 8px;border-top:1px solid var(--line);text-align:right;vertical-align:top}
+  th{color:var(--mute);font-weight:500;font-size:12.5px;border-top:0}
+  td:first-child,th:first-child{text-align:left;color:#c9d4e2}
+  td small{display:block;color:var(--mute);font-size:11.5px}
+  td.win{color:var(--green);font-weight:700}
+  .score{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+  .score div{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px}
+  .score b{font-size:26px;display:block}
+  .kv{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .kv div{background:var(--card2);border-radius:12px;padding:8px 10px}
+  .kv b{display:block;font-size:17px;font-variant-numeric:tabular-nums}
+  .kv span{color:var(--mute);font-size:11.5px}
+  .tabs{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:12px}
+  .tabs button{background:none;border:0;color:var(--mute);font:inherit;font-size:14px;padding:6px 14px;border-radius:9px;cursor:pointer}
+  .tabs button.on{background:var(--card2);color:var(--text)}
+  .chart svg{display:block;width:100%;height:200px}
+  .lg{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#c9d4e2;margin:-2px 0 6px}
+  .lg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .ev{list-style:none;margin:0;padding:0;max-height:340px;overflow:auto}
+  .ev li{display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:13.5px}
+  .ev li:first-child{border-top:0}
+  .ev time{color:var(--mute);min-width:96px;font-variant-numeric:tabular-nums}
+  .empty{color:var(--mute);font-size:14px}
+  footer{color:var(--mute);font-size:12px;margin-top:18px;text-align:center}
+  .setup{max-width:520px;margin:12vh auto;text-align:center}
+  .setup input{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;margin:12px 0}
+  .setup button{padding:11px 20px;border-radius:12px;border:0;background:var(--sel);color:#fff;font:inherit;font-weight:600}
+  .err{color:var(--red);margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="empty" style="text-align:center;margin-top:20vh">Загружаю…</div></div>
+<script>
+const $ = s => document.querySelector(s);
+const COL = {yandex: '#a37ef0', selectel: '#4c9be8'}, MUTE = '#8b9bb0', LINE = '#26354a';
+let GIST = (location.hash || '').replace('#', '').trim();
+try { if (GIST) localStorage.setItem('vpnGist', GIST); else GIST = localStorage.getItem('vpnGist') || ''; } catch (e) {}
+let D = null, RANGE = 0;   // 0 = весь тест, иначе часы
+
+const two = n => String(n).padStart(2, '0');
+const fmtT = (t, d) => { const x = new Date(t*1000); return (d ? `${two(x.getDate())}.${two(x.getMonth()+1)} ` : '') + `${two(x.getHours())}:${two(x.getMinutes())}`; };
+const fmtAgo = s => s < 90 ? 'только что' : s < 3600 ? `${Math.round(s/60)} мин назад` : `${Math.round(s/3600)} ч назад`;
+const q = (v, p) => { v = v.slice().sort((a, b) => a - b); return v.length ? v[Math.min(v.length-1, Math.round(p*(v.length-1)))] : null; };
+const mean = v => v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+const r0 = v => v == null ? '—' : Math.round(v);
+
+function setup(msg) {
+  $('#app').innerHTML = `<div class="setup"><h1>Яндекс vs Selectel</h1>
+    <p class="upd">Вставьте адрес страницы (<code>relay-bench url</code>) или код после #.</p>
+    <input id="g" placeholder="…/bench.html#abc123…"><button id="go">Открыть</button>${msg ? `<div class="err">${msg}</div>` : ''}</div>`;
+  $('#go').onclick = () => { const v = $('#g').value.trim().split('#').pop(); if (v) { location.hash = v; location.reload(); } };
+}
+
+async function load() {
+  if (!GIST) return setup();
+  try {
+    const r = await fetch(`https://api.github.com/gists/${GIST}`, {cache: 'no-store'});
+    if (!r.ok) throw new Error(r.status === 404 ? 'Код не найден' : `GitHub ответил ${r.status}`);
+    const g = await r.json(), f = g.files && g.files['relay-bench.json'];
+    if (!f) throw new Error('Тест ещё не присылал данных — подождите 10 минут');
+    let txt = f.content; if (f.truncated) txt = await (await fetch(f.raw_url, {cache: 'no-store'})).text();
+    D = JSON.parse(txt); render();
+  } catch (e) { if (!D) setup(e.message); else $('.upd').textContent = 'не удалось обновить: ' + e.message; }
+}
+
+// точки сервера как объекты {t, f_ping, …}; down = сервер не ответил
+function pts(name) {
+  const s = D.servers[name]; if (!s) return [];
+  return s.pts.map(a => { const o = {t: a[0], down: a.slice(1).every(v => v == null)}; D.keys.forEach((k, i) => o[k] = a[i+1]); return o; });
+}
+
+const M = [
+  // ключ, название, единица, лучше: low/high, вид
+  ['f_mbps', 'Скорость через Fornex', 'Мбит/с', 'high', 'speed'],
+  ['a_mbps', 'Скорость через Aeza', 'Мбит/с', 'high', 'speed'],
+  ['f_http', 'Отклик сайта через Fornex', 'мс', 'low', 'lat'],
+  ['a_http', 'Отклик сайта через Aeza', 'мс', 'low', 'lat'],
+  ['f_ping', 'Пинг до Fornex', 'мс', 'low', 'lat'],
+  ['a_ping', 'Пинг до Aeza', 'мс', 'low', 'lat'],
+  ['f_loss', 'Потери до Fornex', '%', 'low', 'loss'],
+  ['a_loss', 'Потери до Aeza', '%', 'low', 'loss'],
+  ['ru_ms', 'Отклик ya.ru напрямую', 'мс', 'low', 'lat'],
+  ['yan_mbps', 'Скорость из РФ (зеркало Яндекса)', 'Мбит/с', 'high', 'speed'],
+  ['sel_mbps', 'Скорость из РФ (Selectel)', 'Мбит/с', 'high', 'speed'],
+  ['busy', 'Загрузка процессора', '%', 'low', 'lat'],
+  ['steal', 'Steal процессора', '%', 'low', 'lat'],
+];
+
+function stat(P, k, kind) {
+  const live = P.filter(p => !p.down);
+  if (kind === 'speed') { const v = live.map(p => p[k]).filter(x => x != null); const ok = v.filter(x => x > 0);
+    return {main: q(ok, .5), worst: q(ok, .1), fails: v.length - ok.length + (P.length - live.length)}; }
+  if (kind === 'loss') { const v = live.map(p => p[k]).filter(x => x != null); return {main: mean(v), worst: v.length ? Math.max(...v) : null, fails: v.filter(x => x > 0).length}; }
+  const v = live.map(p => p[k]).filter(x => x != null);
+  return {main: q(v, .5), worst: q(v, .9), fails: k.endsWith('_http') ? live.filter(p => p[k] == null).length + (P.length - live.length) : 0};
+}
+
+function render() {
+  const now = Date.now()/1000, x0all = Math.min(...['yandex','selectel'].flatMap(n => pts(n).map(p => p.t)), now);
+  const cut = RANGE ? now - RANGE*3600 : x0all;
+  const Y = pts('yandex').filter(p => p.t >= cut), S = pts('selectel').filter(p => p.t >= cut);
+  const total = D.end - D.start, done = Math.min(1, Math.max(0, (now - D.start)/total)), left = Math.max(0, (D.end - now)/3600);
+
+  // сравнительная таблица и счёт «побед»
+  let wy = 0, ws = 0;
+  const rows = M.map(([k, name, u, better, kind]) => {
+    const a = stat(Y, k, kind), b = stat(S, k, kind);
+    let win = '';
+    if (a.main != null && b.main != null && k !== 'yan_mbps' && k !== 'sel_mbps') {
+      const diff = Math.abs(a.main - b.main) / Math.max(Math.abs(a.main), Math.abs(b.main), 1e-9);
+      const absd = Math.abs(a.main - b.main);
+      if (diff > 0.05 && !(kind === 'loss' && absd < 0.5) && !((k === 'busy' || k === 'steal') && absd < 2)) win = (better === 'low') === (a.main < b.main) ? 'y' : 's';
+    }
+    if (win === 'y') wy++; if (win === 's') ws++;
+    const cell = (x, w) => `<td class="${w ? 'win' : ''}">${kind === 'loss' && x.main != null ? x.main.toFixed(1) : r0(x.main)}<small>${kind === 'loss' ? 'макс ' + r0(x.worst) : 'худш. ' + r0(x.worst)}${x.fails ? ` · сбоев ${x.fails}` : ''}</small></td>`;
+    return `<tr><td>${name}, ${u}</td>${cell(a, win === 'y')}${cell(b, win === 's')}</tr>`;
+  }).join('');
+  const gu = P => { const v = P.filter(p => !p.down && p.gosuslugi != null); return v.length ? Math.round(v.filter(p => p.gosuslugi > 0).length*100/v.length) : null; };
+  const down = S.filter(p => p.down).length;
+
+  const last = P => P[P.length-1];
+  const nowCard = (name, P) => { const p = last(P); if (!p) return `<div class="empty">Нет данных</div>`;
+    if (p.down) return `<div class="err">Сервер не ответил в ${fmtT(p.t)}</div>`;
+    return `<div class="kv"><div><b>${r0(p.f_mbps)}</b><span>Мбит/с через Fornex</span></div><div><b>${r0(p.f_http)}</b><span>мс отклик</span></div>
+      <div><b>${r0(p.f_ping)}</b><span>мс пинг Fornex</span></div><div><b>${r0(p.a_mbps)}</b><span>Мбит/с через Aeza</span></div>
+      <div><b>${r0(p.busy)}%</b><span>процессор</span></div><div><b>${p.gosuslugi > 0 ? 'да' : 'нет'}</b><span>Госуслуги</span></div></div>
+      <div class="mute" style="margin-top:8px">замер ${fmtT(p.t, true)}</div>`; };
+
+  // события
+  const ev = [];
+  for (const [n, P] of [['Яндекс', Y], ['Selectel', S]]) for (const p of P) {
+    if (p.down) { ev.push([p.t, `${n}: сервер не ответил`]); continue; }
+    if (p.f_http == null) ev.push([p.t, `${n}: нет выхода через Fornex`]);
+    if (p.a_http == null) ev.push([p.t, `${n}: нет выхода через Aeza`]);
+    if (p.f_mbps === 0) ev.push([p.t, `${n}: скачивание через Fornex оборвалось`]);
+    if (p.a_mbps === 0) ev.push([p.t, `${n}: скачивание через Aeza оборвалось`]);
+    if (p.f_loss > 0) ev.push([p.t, `${n}: потери до Fornex ${r0(p.f_loss)}%`]);
+    if (p.a_loss > 0) ev.push([p.t, `${n}: потери до Aeza ${r0(p.a_loss)}%`]);
+  }
+  ev.sort((a, b) => b[0] - a[0]);
+
+  $('#app').innerHTML = `
+    <header><h1>Яндекс vs Selectel</h1><span class="upd">обновлено ${fmtAgo(now - D.updated)} · ${fmtT(D.updated, true)}</span></header>
+    <div class="mute">Замер раз в ${D.every_min} мин на обоих серверах одинаково · ${Y.length} / ${S.length} замеров · ${left > 0 ? `до конца теста ${Math.round(left)} ч` : 'тест завершён'}</div>
+    <div class="prog"><i style="width:${(done*100).toFixed(1)}%"></i></div>
+    <div class="score">
+      <div><span class="sw" style="background:${COL.yandex}"></span> Яндекс<b>${wy}</b><span class="mute">показателей лучше</span></div>
+      <div><span class="sw" style="background:${COL.selectel}"></span> Selectel<b>${ws}</b><span class="mute">показателей лучше</span></div>
+      <div>Госуслуги напрямую<b>${gu(Y) ?? '—'}% / ${gu(S) ?? '—'}%</b><span class="mute">Яндекс / Selectel, доля замеров</span></div>
+      <div>Selectel не отвечал<b>${down}</b><span class="mute">раз за период</span></div>
+    </div>
+    <div class="tabs">${[[0,'Весь тест'],[24,'24 ч'],[6,'6 ч']].map(([r,n]) => `<button data-r="${r}" class="${RANGE===r?'on':''}">${n}</button>`).join('')}</div>
+    <div class="grid">
+      <div class="card"><h3><span class="sw" style="background:${COL.yandex}"></span>Яндекс · сейчас</h3><div class="sub">последний замер</div>${nowCard('Яндекс', Y)}</div>
+      <div class="card"><h3><span class="sw" style="background:${COL.selectel}"></span>Selectel · сейчас</h3><div class="sub">последний замер</div>${nowCard('Selectel', S)}</div>
+    </div>
+    <div class="card" style="margin-bottom:16px"><h3>Сравнение за период</h3>
+      <div class="sub">медиана; под ней — худшие 10% замеров и число сбоев. Зелёным — заметно лучше (разница больше 5%). Скорость из РФ не сравнивается: каждый сервер ближе к «своему» зеркалу.</div>
+      <table><tr><th>Показатель</th><th>Яндекс</th><th>Selectel</th></tr>${rows}</table></div>
+    <div class="grid">${M.map(([k, name, u]) => `<div class="card"><h3>${name}</h3><div class="sub">${u}</div><div class="chart" id="c_${k}"></div></div>`).join('')}</div>
+    <div class="card"><h3>События</h3><div class="sub">сбои и потери за период</div>
+      ${ev.length ? `<ul class="ev">${ev.slice(0, 80).map(e => `<li><time>${fmtT(e[0], true)}</time><span>${e[1]}</span></li>`).join('')}</ul>` : '<div class="empty">Сбоев не было 👍</div>'}</div>
+    <footer>Данные без IP-адресов и ключей · обновление страницы раз в 5 минут</footer>`;
+  document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { RANGE = +b.dataset.r; render(); });
+  const x1 = Math.max(now, ...[...Y, ...S].map(p => p.t));
+  for (const [k, , , , kind] of M) chart('c_' + k, [['Яндекс', COL.yandex, Y], ['Selectel', COL.selectel, S]].map(([l, c, P]) =>
+    ({label: l, color: c, pts: P.map(p => ({x: p.t, y: p.down ? null : (kind === 'speed' && p[k] === 0 ? null : p[k])}))})), cut, x1);
+}
+
+function chart(id, sets, x0, x1) {
+  const host = $('#' + id); if (!host) return;
+  const W = Math.max(host.clientWidth, 280), H = 200, pl = 38, pr = 8, pt = 8, pb = 24;
+  const ys = sets.flatMap(s => s.pts.map(p => p.y)).filter(v => v != null);
+  let top = Math.max(...ys, 1) * 1.12;
+  const step = [0.5,1,2,5,10,20,25,50,100,200,250,500,1000].find(v => top/v <= 5) || 1000; top = Math.ceil(top/step)*step;
+  const X = t => pl + (t - x0) / Math.max(x1 - x0, 1) * (W - pl - pr), Y = v => pt + (1 - v/top) * (H - pt - pb);
+  let g = '';
+  for (let v = 0; v <= top + 1e-9; v += step) g += `<line x1="${pl}" x2="${W-pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="${LINE}"/><text x="${pl-6}" y="${Y(v)+4}" fill="${MUTE}" font-size="11" text-anchor="end">${+v.toFixed(1)}</text>`;
+  const nx = W < 420 ? 3 : 5, days = x1 - x0 > 86400;
+  for (let i = 0; i <= nx; i++) { const t = x0 + (x1-x0)*i/nx;
+    g += `<text x="${X(t)}" y="${H-6}" fill="${MUTE}" font-size="11" text-anchor="${i === 0 ? 'start' : i === nx ? 'end' : 'middle'}">${days ? fmtT(t, true) : fmtT(t)}</text>`; }
+  for (const s of sets) {
+    let segs = [], cur = [];
+    for (const p of s.pts) { if (p.y == null) { if (cur.length) { segs.push(cur); cur = []; } } else cur.push(p); }
+    if (cur.length) segs.push(cur);
+    for (const sg of segs) {
+      g += `<path d="${sg.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join('')}" fill="none" stroke="${s.color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>`;
+      if (sg.length === 1) g += `<circle cx="${X(sg[0].x)}" cy="${Y(sg[0].y)}" r="3" fill="${s.color}"/>`;
+    }
+  }
+  host.innerHTML = `<div class="lg">${sets.map(s => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join('')}</div><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>`;
+}
+
+window.addEventListener('resize', () => { if (D) render(); });
+load(); setInterval(load, 5*60*1000);
+</script>
+</body>
+</html>

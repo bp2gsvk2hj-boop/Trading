@@ -94,6 +94,10 @@ lat() {  # медиана 3 проб через сервер, мс; пусто �
   [ ${#a[@]} -gt 0 ] && printf '%s\n' "${a[@]}" | sort -n | sed -n "$(( (${#a[@]}+1)/2 ))p" | awk '{printf "%.0f", $1*1000}'
 }
 TB1=0; TB2=0
+# байты замеров relay-bench через этот сервер — тоже не ваш трафик
+if [ -s "$ST/bench-bytes" ]; then
+  read -r TB1 TB2 < <(awk '{a+=$1; b+=$2} END{printf "%d %d", a, b}' "$ST/bench-bytes"); : > "$ST/bench-bytes"
+fi
 speed() {  # $1 порт, $2 номер сервера  # скачивание 20 МБ через сервер, Мбит/с
   local r; r=$(curl -s -o /dev/null -m 40 -w '%{speed_download} %{size_download}' -x "socks5h://127.0.0.1:$1" 'https://speed.cloudflare.com/__down?bytes=20000000')
   eval "TB$2=\$(( TB$2 + ${r#* } ))"
