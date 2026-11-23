@@ -1,12 +1,13 @@
-name: Publish Pages (Konsilium + bonds + placements)
+name: Publish Pages (Konsilium + bonds + placements + trader)
 
 # Publishes konsilium/ at the site root, bonds/ at /bonds/ and placements/ at /placements/.
-# The «Помощник трейдера» app (trader/) is served from the own server now (server/install.sh).
+# The «Помощник трейдера» app is at /trader/; its data comes from the robot's server through a secret
+# gist (server/trader-publish.sh), the gist id goes after # in the address.
 # The trading robot code is not part of the site.
 on:
   push:
     branches: [main]
-    paths: ["konsilium/**", "bonds/**", "placements/**", "vpnstatus/**", ".github/workflows/konsilium-pages.yml"]
+    paths: ["konsilium/**", "bonds/**", "placements/**", "vpnstatus/**", "trader/index.html", ".github/workflows/konsilium-pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -35,6 +36,8 @@ jobs:
           cp -r bonds/. _site/bonds/
           mkdir -p _site/placements
           cp -r placements/. _site/placements/
+          mkdir -p _site/trader
+          cp trader/index.html _site/trader/
           mkdir -p _site/vpn-status
           cp -r vpnstatus/. _site/vpn-status/
       - uses: actions/upload-pages-artifact@v3

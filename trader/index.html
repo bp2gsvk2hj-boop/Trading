@@ -527,7 +527,20 @@ document.addEventListener("click", e => {
 let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(render, 150); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") $("#sheet").classList.remove("on"); });
 render();
-fetch("data.json", {cache:"no-store"}).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+// На сервере данные лежат рядом (data.json). На GitHub Pages — в секретном gist, его код после # в адресе.
+async function loadData() {
+  let gist = (location.hash || "").replace("#", "").trim();
+  try { if (gist) localStorage.setItem("ta-gist", gist); else if (location.hostname.endsWith("github.io")) gist = localStorage.getItem("ta-gist") || ""; } catch(e){}
+  if (!gist) { const r = await fetch("data.json", {cache:"no-store"}); if (!r.ok) throw new Error(r.status); return r.json(); }
+  const r = await fetch(`https://api.github.com/gists/${gist}`, {cache:"no-store"});
+  if (!r.ok) throw new Error(r.status === 404 ? "код в адресе не найден" : "GitHub " + r.status);
+  const f = (await r.json()).files["trader-data.json"];
+  if (!f) throw new Error("сервер ещё не прислал данные");
+  return JSON.parse(f.truncated ? await (await fetch(f.raw_url, {cache:"no-store"})).text() : f.content);
+}
+const reload = () => loadData().then(d => { D = d; render(); });
+setInterval(() => reload().catch(() => {}), 5*60*1000);
+loadData()
   .then(d => { D = d; render(); })
   .catch(err => { $("#view").innerHTML = `<div class="card" style="margin-top:12px"><h3>Нет данных</h3><div class="empty">Не удалось загрузить data.json (${esc(err.message)}).</div></div>`; });
 </script>
