@@ -1,0 +1,11 @@
+name: brokernews-check
+# Проверка фильтра на реальных данных: кандидаты за 7 дней, без ChatGPT и без отправки.
+on:
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m brokernews candidates --hours 168
