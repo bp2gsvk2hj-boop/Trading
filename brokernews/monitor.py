@@ -24,6 +24,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 import urllib.error
@@ -132,15 +133,14 @@ class Store:
 
 
 class Health:
-    """Контроль источников: молчащие, недоступные, пустые. Владельцу — только новые проблемы
-    и восстановления, не каждый запуск."""
+    """Состояние источников. Сбой отдельного источника — только в журнал и в команду sources.
+    Владельцу — одно сообщение, когда сбор ломается целиком (не читается большинство отраслевых
+    источников) и когда снова работает."""
 
     def __init__(self, db: sqlite3.Connection, cfg: dict):
         self.db = db
         self.db.execute("""CREATE TABLE IF NOT EXISTS health (src TEXT PRIMARY KEY, label TEXT,
             fails INTEGER DEFAULT 0, last_ok TEXT, last_post TEXT, problem TEXT DEFAULT '')""")
-        self.silence = timedelta(days=int(cfg.get("health", {}).get("silence_days", 7)))
-        self.min_fails = int(cfg.get("health", {}).get("fail_runs", 2))
         self.run: dict[str, tuple[bool, str]] = {}
 
     def record(self, src: str, label: str, ok: bool, last_post: datetime | None = None, error: str = "") -> None:
@@ -153,40 +153,33 @@ class Health:
             last_ok=COALESCE(?, health.last_ok), last_post=excluded.last_post""",
                         (src, label, fails, now if ok else None, lp, now if ok else None))
         self.run[src] = (ok, error)
+        if not ok:
+            log("warn", f"источник не ответил: {label}: {error[:120]}")
+
+    def _flag(self, key: str, on: bool) -> bool:
+        """Запомнить состояние флага; True — если оно изменилось."""
+        row = self.db.execute("SELECT problem FROM health WHERE src=?", (key,)).fetchone()
+        was = bool(row and row[0])
+        self.db.execute("INSERT OR REPLACE INTO health (src, label, problem) VALUES (?, ?, ?)",
+                        (key, key, "1" if on else ""))
+        self.db.commit()
+        return was != on
 
     def problems(self) -> tuple[list[str], list[str]]:
-        """-> (новые проблемы, восстановившиеся). Запоминает текущее состояние."""
-        now = datetime.now(timezone.utc)
-        new, fixed = [], []
-        for src, label, fails, last_post, prev in self.db.execute(
-                "SELECT src, label, fails, last_post, problem FROM health").fetchall():
-            if src == "_tg_mass":
-                continue
-            if src not in self.run:          # источник убрали из настроек
+        """-> (новые критические проблемы, восстановления). Отдельные источники не сообщаются."""
+        for (src,) in self.db.execute("SELECT src FROM health").fetchall():
+            if not src.startswith("_") and src not in self.run:   # источник убрали из настроек
                 self.db.execute("DELETE FROM health WHERE src=?", (src,))
-                continue
-            problem = ""
-            if fails >= self.min_fails:
-                problem = f"не загружается {fails} запуска подряд ({self.run[src][1][:80] or 'нет данных'})"
-            elif src.startswith("tg:") and last_post and now - datetime.fromisoformat(last_post) > self.silence:
-                days = (now - datetime.fromisoformat(last_post)).days
-                problem = f"молчит {days} дн."
-            if problem and not prev:
-                new.append(f"• {label}: {problem}")
-            elif prev and not problem:
-                fixed.append(f"• {label}")
-            self.db.execute("UPDATE health SET problem=? WHERE src=?", (problem, src))
-        tg = [ok for src, (ok, _) in self.run.items() if src.startswith("tg:")]
-        mass = len(tg) >= 4 and tg.count(False) >= len(tg) / 2
-        row = self.db.execute("SELECT problem FROM health WHERE src='_tg_mass'").fetchone()
-        if mass and not (row and row[0]):
-            new.insert(0, f"• Telegram: не читаются {tg.count(False)} из {len(tg)} каналов сразу — "
-                          "t.me недоступен через VPN или сменилась вёрстка страниц")
-        elif row and row[0] and not mass:
-            fixed.insert(0, "• Telegram: каналы снова читаются")
-        self.db.execute("INSERT OR REPLACE INTO health (src, label, problem) VALUES ('_tg_mass', 'Telegram', ?)",
-                        ("mass" if mass else "",))
-        self.db.commit()
+        key = [ok for src, (ok, _) in self.run.items() if not src.startswith("tgp:")]
+        down = key.count(False)
+        critical = len(key) >= 4 and down >= len(key) / 2
+        new, fixed = [], []
+        if self._flag("_critical", critical):
+            if critical:
+                new.append(f"• не отвечают {down} из {len(key)} отраслевых источников — проверьте VPN-выход "
+                           "и доступ сервера в интернет")
+            else:
+                fixed.append("• сбор источников снова работает")
         return new, fixed
 
 
@@ -197,6 +190,10 @@ def text_hash(text: str) -> str:
 
 # ---- фильтр по ключевым словам ------------------------------------------------
 class Matcher:
+    """Первичное сито. Группы [keywords] — по чему материал вообще может быть интересен;
+    [exclude] patterns — рыночный контент (аналитика, котировки, размещения), он отбрасывается,
+    кроме продуктовых новостей СберИнвестиций и собственных бумаг Сбера ([exclude] keep_if)."""
+
     def __init__(self, cfg: dict):
         f = re.IGNORECASE | re.DOTALL   # .{0,80} ловит слова и на соседних строках поста
         self.groups = {g: [re.compile(p, f) for p in pats] for g, pats in (cfg.get("keywords") or {}).items()}
@@ -204,10 +201,16 @@ class Matcher:
         self.exclude = [re.compile(p, f) for p in ex.get("patterns", [])]
         self.keep_if = re.compile(ex["keep_if"], f) if ex.get("keep_if") else None
 
+    def excluded(self, text: str) -> bool:
+        return any(p.search(text) for p in self.exclude) and not (self.keep_if and self.keep_if.search(text))
+
     def match(self, text: str) -> list[str]:
-        if any(p.search(text) for p in self.exclude) and not (self.keep_if and self.keep_if.search(text)):
+        if self.excluded(text):
             return []
         return [g for g, pats in self.groups.items() if any(p.search(text) for p in pats)]
+
+
+SBER = "СберИнвестиции"   # группа [keywords], обязательная для «наблюдения за промо» и аналитических сайтов
 
 
 # ---- Telegram: публичные каналы через t.me/s/<канал> ----------------------------
@@ -272,18 +275,20 @@ def tg_page(net: Net, name: str, before: int | None = None) -> tuple[str | None,
     return page.title, page.result()
 
 
-def channel_names(cfg: dict) -> list[tuple[str, bool]]:
-    """Каналы из настроек: [(имя, брать_всё)]. Имя может быть списком вариантов «a|b|c» —
-    если точное @имя неизвестно; читается первый вариант, у которого есть посты."""
+def channel_names(cfg: dict) -> list[tuple[str, str]]:
+    """Каналы из настроек: [(имя, уровень)]. Уровни: "industry" — отраслевые каналы, все посты
+    проходят тематический фильтр; "promo" — рыночные каналы, из них берём только посты про
+    СберИнвестиции (посевы, промо). Имя может быть списком вариантов «a|b|c»."""
     t = cfg.get("telegram", {})
     out, seen = [], set()
-    for names, take_all in ((t.get("channels_all", []), True), (t.get("channels", []), False)):
+    for names, tier in ((t.get("channels", []) + t.get("channels_all", []), "industry"),
+                        (t.get("promo_watch", []), "promo")):
         for n in names:
             alts = [a.rsplit("/", 1)[-1].lstrip("@").strip() for a in str(n).split("|")]
             n = "|".join(a for a in alts if a)
             if n and n.lower() not in seen:
                 seen.add(n.lower())
-                out.append((n, take_all))
+                out.append((n, tier))
     return out
 
 
@@ -314,8 +319,9 @@ def collect_telegram(net, cfg, since, store, matcher, health: "Health | None" = 
     pages_max = int(cfg.get("telegram", {}).get("max_pages", 3))
     official = {n.lower().lstrip("@") for n in cfg.get("telegram", {}).get("official", [])}
     items, bad = [], []
-    for entry, take_all in channel_names(cfg):
+    for entry, tier in channel_names(cfg):
         name = entry.split("|")[0]
+        hkey = ("tg:" if tier == "industry" else "tgp:") + entry.lower()
         try:
             title, posts, before = None, [], None
             for page in range(pages_max):
@@ -334,7 +340,7 @@ def collect_telegram(net, cfg, since, store, matcher, health: "Health | None" = 
                 time.sleep(0.4)
             label = f"@{name}" if posts or "|" not in entry else "@" + " / @".join(entry.split("|"))
             if health:
-                health.record(f"tg:{entry.lower()}", label, bool(posts),
+                health.record(hkey, label, bool(posts),
                               max((p["date"] for p in posts), default=None), "не найден или пустая страница")
             if not posts:
                 bad.append(label)
@@ -347,17 +353,20 @@ def collect_telegram(net, cfg, since, store, matcher, health: "Health | None" = 
                 key = f"tg:{name.lower()}:{p['id']}"
                 if store.seen(key):
                     continue
-                groups = matcher.match(p["text"]) or (["Прочее"] if take_all else [])
+                groups = matcher.match(p["text"])
+                if tier == "promo" and SBER not in groups:
+                    continue
                 if groups:
                     items.append(dict(key=key, source=f"TG: {title or name}", text=p["text"], kind=kind,
                                       url=f"https://t.me/{name}/{p['id']}", date=p["date"], groups=groups))
         except Exception as e:  # noqa: BLE001
             log("warn", f"t.me/s/{name}: {e}")
             if health:
-                health.record(f"tg:{entry.lower()}", f"@{name}", False, error=str(e))
+                health.record(hkey, f"@{name}", False, error=str(e))
         time.sleep(0.4)
     if bad:
         log("warn", "каналы не найдены или без веб-версии: " + ", ".join(bad))
+
     log("info", f"Telegram: {len(items)} подходящих постов")
     return items
 
@@ -473,8 +482,15 @@ def domain(url: str) -> str:
     return urllib.parse.urlparse(url or "").netloc.lower().removeprefix("www.")
 
 
+def domain_in(d: str, domains: list[str]) -> bool:
+    return any(d == o or d.endswith("." + o) for o in domains)
+
+
 def collect_news(net, cfg, since, store, matcher, health: "Health | None" = None) -> list[dict]:
+    """RSS-ленты и поиск. С сайтов рыночной аналитики ([news] analytics_domains) берём только
+    материалы про СберИнвестиции — остальное там прогнозы и обзоры, не новости отрасли."""
     official = [d.lower() for d in cfg.get("news", {}).get("official_domains", [])]
+    analytics = [d.lower() for d in cfg.get("news", {}).get("analytics_domains", [])]
     items = []
     for url, label in news_urls(cfg):
         try:
@@ -498,9 +514,11 @@ def collect_news(net, cfg, since, store, matcher, health: "Health | None" = None
             title, summary = en["title"], en["summary"]
             text = f"{title}. {summary}" if summary and summary[:40] not in title else title
             groups = matcher.match(text)
+            d = domain(en.get("source_url") or en["link"])
+            if domain_in(d, analytics) and SBER not in groups:
+                continue
             if groups:
-                d = domain(en.get("source_url") or en["link"])
-                kind = "официально" if any(d == o or d.endswith("." + o) for o in official) else "СМИ"
+                kind = "официально" if domain_in(d, official) else "СМИ"
                 items.append(dict(key=key, source=en["source"] or feed_title[:60] or "СМИ", text=text, kind=kind,
                                   url=en["link"], date=en["date"], groups=groups))
     if yandex_search_on():
@@ -523,9 +541,11 @@ def collect_news(net, cfg, since, store, matcher, health: "Health | None" = None
                     continue
                 text = f"{en['title']}. {en['summary']}" if en["summary"] else en["title"]
                 groups = matcher.match(text)
+                d = domain(en["link"])
+                if domain_in(d, analytics) and SBER not in groups:
+                    continue
                 if groups:
-                    d = domain(en["link"])
-                    kind = "официально" if any(d == o or d.endswith("." + o) for o in official) else "СМИ"
+                    kind = "официально" if domain_in(d, official) else "СМИ"
                     items.append(dict(key=key, source=en["source"] or d, text=text, kind=kind, url=en["link"],
                                       date=en["date"] or datetime.now(timezone.utc), groups=groups))
     log("info", f"Новости: {len(items)} подходящих")
@@ -559,10 +579,20 @@ KIND_MARK = {"official": "🏛 ", "opinion": "💬 ", "ad": "📣 ", "media": ""
 LEGEND = "<i>🏛 официальное сообщение · 📣 промо · 💬 мнение</i>"
 
 SELECT_FORMAT = """
-ЗАДАЧА: строгий редакторский отбор. Тебе дан пронумерованный список материалов-кандидатов.
-Верни номера только тех, что соответствуют редакционной политике (раздел «БЕРЁМ») и не попадают
-в «НЕ БЕРЁМ». Решай по сути материала, а не по наличию ключевых слов.
-Ответ — строго JSON: {"keep": [номера]}. Пустой список — нормальный ответ.
+ЗАДАЧА: строгий редакторский отбор. Ниже пронумерованные материалы-кандидаты (и список уже
+опубликованного за последние дни). Для КАЖДОГО кандидата мысленно ответь на три вопроса:
+  1) Это непосредственно о брокерских услугах, брокерском бизнесе, регулировании брокеров
+     и их клиентов-инвесторов или о СберИнвестициях? (аналитика рынка, прогнозы, обзоры
+     бумаг, торговые идеи — НЕТ, даже если их выпустил брокер);
+  2) Это новое существенное событие или решение — не мнение, прогноз, пересказ старого
+     и не повтор уже опубликованного?
+  3) Можешь ли ты одной фразой сказать, зачем это знать руководителю СберИнвестиций?
+Берёшь материал, только если на все три вопроса ответ уверенное «да». Сомневаешься — не бери.
+Совершенно нормально взять 0–3 материала из сотни.
+Ответ — строго JSON:
+{"keep": [{"n": номер, "why": "зачем знать руководителю СберИнвестиций, до 15 слов"}],
+ "near": [{"n": номер, "why": "почему не взят, до 10 слов"}]}
+"near" — до 5 самых близких к отбору отклонённых материалов (для контроля пропусков).
 """
 
 WRITE_FORMAT = """
@@ -576,8 +606,9 @@ WRITE_FORMAT = """
          "why": "..." (только у пунктов "main")}
 Ключи разделов: %s.
 Правила:
-- Всего не больше %d пунктов вместе с "main"; "main" — 1–3 самых важных события.
-  Если важного мало — выпуск короче. Слабые материалы просто не включай.
+- Не больше %d пунктов вместе с "main"; "main" — 1–3 самых важных события. Минимума нет:
+  если отобрано 2 события — в выпуске 2 пункта.
+- Перед ответом ещё раз проверь каждый пункт тремя вопросами отбора; не проходит — убери.
 - КАЖДОЕ событие — РОВНО ОДИН пункт во всём выпуске: событие из "main" не повторяй в разделах;
   одно событие из разных источников — один пункт, все номера в "src".
 - Только факты из материалов; оговорки («планирует», «по данным источников») сохраняй;
@@ -598,22 +629,29 @@ def policy(cfg: dict) -> str:
     return llm.get("policy") or llm.get("prompt", "")
 
 
-def chat_json(net: Net, cfg: dict, system: str, user: str) -> dict | None:
+def chat_json(net: Net, cfg: dict, system: str, user: str, model: str | None = None) -> dict | None:
+    """JSON-ответ модели. Если указанная модель недоступна аккаунту — запасная [llm] model."""
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not key:
         return None
     llm = cfg.get("llm", {})
-    code, r = net.post_json(llm.get("url", "https://api.openai.com/v1/chat/completions"),
-                            {"model": llm.get("model", "gpt-5-mini"),
-                             "response_format": {"type": "json_object"},
-                             "messages": [{"role": "system", "content": system},
-                                          {"role": "user", "content": user}]},
-                            {"Authorization": f"Bearer {key}"}, timeout=int(llm.get("timeout", 300)))
-    if code != 200:
-        raise RuntimeError(f"OpenAI HTTP {code}: {str(r.get('error') or r)[:300]}")
-    text = r["choices"][0]["message"]["content"].strip()
-    text = re.sub(r"^```\w*\n?|```$", "", text).strip()
-    return json.loads(text)
+    models = [m for m in dict.fromkeys([model or llm.get("model", "gpt-5-mini"), llm.get("model", "gpt-5-mini")]) if m]
+    err = ""
+    for mdl in models:
+        code, r = net.post_json(llm.get("url", "https://api.openai.com/v1/chat/completions"),
+                                {"model": mdl, "response_format": {"type": "json_object"},
+                                 "messages": [{"role": "system", "content": system},
+                                              {"role": "user", "content": user}]},
+                                {"Authorization": f"Bearer {key}"}, timeout=int(llm.get("timeout", 300)))
+        if code == 200:
+            text = r["choices"][0]["message"]["content"].strip()
+            text = re.sub(r"^```\w*\n?|```$", "", text).strip()
+            return json.loads(text)
+        err = f"OpenAI HTTP {code} ({mdl}): {str(r.get('error') or r)[:300]}"
+        if code not in (400, 403, 404):        # не «нет такой модели» — запасная не поможет
+            break
+        log("warn", err)
+    raise RuntimeError(err)
 
 
 def material_lines(items: list[dict], max_chars: int) -> str:
@@ -625,14 +663,27 @@ def material_lines(items: list[dict], max_chars: int) -> str:
     return "\n\n".join(lines)
 
 
-def select_items(net: Net, cfg: dict, items: list[dict]) -> list[dict] | None:
-    """Этап 1: редактор отбирает материалы по политике. None — модель недоступна."""
-    max_chars = int(cfg.get("digest", {}).get("max_chars", 600))
-    data = chat_json(net, cfg, policy(cfg) + SELECT_FORMAT, material_lines(items, max_chars))
+def select_items(net: Net, cfg: dict, items: list[dict], published: list[str] | None = None) -> dict | None:
+    """Этап 1: редактор отбирает материалы по трём вопросам. None — ключа OpenAI нет.
+    -> {"keep": [(материал, зачем)], "near": [(материал, почему нет)]}"""
+    d = cfg.get("digest", {})
+    user = material_lines(items, int(d.get("max_chars", 600)))
+    if published:
+        user = "УЖЕ ОПУБЛИКОВАНО (не брать повторно):\n" + "\n".join(f"- {t}" for t in published) + \
+            "\n\nКАНДИДАТЫ:\n" + user
+    data = chat_json(net, cfg, policy(cfg) + SELECT_FORMAT, user, cfg.get("llm", {}).get("select_model"))
     if data is None:
         return None
-    keep = {int(n) for n in data.get("keep", []) if str(n).isdigit()}
-    return [it for i, it in enumerate(items, 1) if i in keep]
+
+    def pick(key):
+        out, seen = [], set()
+        for x in data.get(key) or []:
+            n = x.get("n") if isinstance(x, dict) else x
+            if str(n).isdigit() and 0 < int(n) <= len(items) and int(n) not in seen:
+                seen.add(int(n))
+                out.append((items[int(n) - 1], str(x.get("why", "")) if isinstance(x, dict) else ""))
+        return out
+    return {"keep": pick("keep"), "near": pick("near")}
 
 
 def ask_llm(net: Net, cfg: dict, user: str) -> dict | None:
@@ -720,48 +771,37 @@ def render(cfg: dict, data: dict, items: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
-def fallback_digest(items: list[dict], limit: int = 40, cfg: dict | None = None) -> str:
-    secs = sections(cfg or {})
-    by_sec: dict[str, list[dict]] = {}
-    for it in items[:limit]:
-        by_sec.setdefault(GROUP_SECTION.get(it["groups"][0], "brokers"), []).append(it)
-    blocks = []
-    for key, title in secs.items():
-        lst = by_sec.get(key)
-        if not lst:
-            continue
-        pts = []
-        for it in lst:
-            text = html.escape(re.sub(r"\s+", " ", it["text"])[:220])
-            link = f'<a href="{html.escape(it["url"])}">{html.escape(it["source"].removeprefix("TG: "))}</a>'
-            pts.append(f"• {text} — {link}")
-        blocks.append(header(title) + "\n" + "\n".join(pts))
-    if len(items) > limit:
-        blocks.append(f"…и ещё {len(items) - limit}")
-    return "\n\n".join(blocks)
+class EditorUnavailable(RuntimeError):
+    """Модель не ответила: выпуск не публикуется (в канал — только редакторский выпуск)."""
 
 
-def build_digest(net, cfg, items, since, now) -> tuple[str, str]:
-    """-> (период, тело выпуска). Пустое тело — редактор не нашёл ничего достойного."""
+def build_digest(net, cfg, items, since, now, published: list[str] | None = None) -> tuple[str, str, dict]:
+    """-> (период, тело выпуска, решения редактора). Пустое тело — значимых новостей нет.
+    Без редактора не публикуем ничего: EditorUnavailable."""
     period = f"{since.astimezone(MSK):%d.%m %H:%M} – {now.astimezone(MSK):%d.%m %H:%M} МСК"
     d = cfg.get("digest", {})
     items = sort_items(cfg, items)[:int(d.get("max_items", 250))]
     try:
-        chosen = select_items(net, cfg, items)
-        if chosen is None:
-            return period, fallback_digest(items, cfg=cfg)
-        log("info", f"редактор отобрал {len(chosen)} из {len(items)}")
-        if not chosen:
-            return period, ""
-        data = ask_llm(net, cfg, f"Период: {period}\n\n" + material_lines(chosen, int(d.get("max_chars", 600))))
-        return period, render(cfg, data, chosen) if data else fallback_digest(chosen, cfg=cfg)
+        sel = select_items(net, cfg, items, published)
+        if sel is None:
+            raise EditorUnavailable("нет ключа OpenAI (OPENAI_API_KEY)")
+        log("info", f"редактор отобрал {len(sel['keep'])} из {len(items)}")
+        for it, why in sel["keep"]:
+            short = re.sub(r"\s+", " ", it["text"])[:90]
+            log("info", f"  + {it['source']}: {short} — {why}")
+        if not sel["keep"]:
+            return period, "", sel
+        chosen = [it for it, _ in sel["keep"]]
+        lines = material_lines(chosen, int(d.get("max_chars", 600)))
+        notes = "\n".join(f"[{i}] зачем: {why}" for i, (_, why) in enumerate(sel["keep"], 1) if why)
+        data = ask_llm(net, cfg, f"Период: {period}\n\n{lines}\n\nЗАМЕТКИ РЕДАКТОРА:\n{notes}")
+        return period, render(cfg, data or {}, chosen), sel
+    except EditorUnavailable:
+        raise
     except Exception as e:  # noqa: BLE001
-        log("warn", f"ChatGPT не ответил, отправляю список: {e}")
-        LLM_ERRORS.append(str(e)[:200])
-        return period, fallback_digest(items, cfg=cfg)
+        raise EditorUnavailable(str(e)[:300]) from e
 
 
-LLM_ERRORS: list[str] = []
 
 
 # ---- отправка ------------------------------------------------------------------
@@ -833,19 +873,15 @@ def send_owner(net: Net, text: str) -> None:
         log("warn", f"предупреждение владельцу не отправлено: {e}")
 
 
-def health_report(new: list[str], fixed: list[str], llm_errors: list[str]) -> str | None:
+def health_report(new: list[str], fixed: list[str]) -> str | None:
     parts = []
     if new:
-        parts.append("Проблемы с источниками:\n" + "\n".join(html.escape(x) for x in new))
-    if llm_errors:
-        parts.append("Сводка ChatGPT не получилась, дайджест ушёл списком ссылок:\n• "
-                     + html.escape(llm_errors[-1]))
+        parts.append("Проблема:\n" + "\n".join(html.escape(x) for x in new))
     if fixed:
-        parts.append("Снова работают:\n" + "\n".join(html.escape(x) for x in fixed))
+        parts.append("Снова работает:\n" + "\n".join(html.escape(x) for x in fixed))
     if not parts:
         return None
-    return "<b>⚠️ Дайджест рынка — служебное</b>\n\n" + "\n\n".join(parts) + \
-        "\n\n<i>Проверить каналы: python3 -m brokernews channels</i>"
+    return "<b>⚠️ Дайджест рынка — служебное</b>\n\n" + "\n\n".join(parts)
 
 
 def publish_web(web: Path, entry: dict, keep: int = 90) -> None:
@@ -870,10 +906,10 @@ def load_config(path: Path = CONFIG) -> dict:
         return tomllib.load(f)
 
 
-def cmd_run(hours: int | None, dry_run: bool, web: Path | None) -> int:
+def cmd_run(hours: int | None, dry_run: bool, web: Path | None, review: bool = False) -> int:
     store = Store(STATE / "brokernews.db")
     try:
-        return _run(store, hours, dry_run, web)
+        return _run(store, hours, dry_run, web, review)
     finally:
         store.close()
 
@@ -884,9 +920,40 @@ def weekend_skip(cfg: dict, now: datetime) -> bool:
     return bool(cfg.get("digest", {}).get("weekdays_only", True)) and now.astimezone(MSK).weekday() >= 5
 
 
-def _run(store: "Store", hours: int | None, dry_run: bool, web: Path | None) -> int:
+def published_titles(store: "Store", days: int = 7) -> list[str]:
+    store.db.execute("CREATE TABLE IF NOT EXISTS published (title TEXT, ts INTEGER)")
+    since = int(time.time()) - days * 86400
+    return [t for (t,) in store.db.execute("SELECT title FROM published WHERE ts >= ? ORDER BY ts", (since,))]
+
+
+def remember_published(store: "Store", body: str) -> None:
+    store.db.execute("CREATE TABLE IF NOT EXISTS published (title TEXT, ts INTEGER)")
+    now = int(time.time())
+    titles = re.findall(r"<b>([^<]{4,120})</b>", body)
+    titles = [t for t in titles if not t.startswith(("🔥", "🟢", "🏦", "⚖", "📊", "🎤"))]
+    store.db.executemany("INSERT INTO published VALUES (?, ?)", [(html.unescape(t), now) for t in titles])
+    store.db.execute("DELETE FROM published WHERE ts < ?", (now - 30 * 86400,))
+    store.db.commit()
+
+
+def review_text(period: str, body: str, sel: dict, total: int) -> str:
+    """Разбор для владельца: черновик выпуска и решения редактора."""
+    def row(it, why):
+        t = html.escape(re.sub(r"\s+", " ", it["text"])[:110])
+        return f'• <a href="{html.escape(it["url"])}">{html.escape(it["source"].removeprefix("TG: ")[:30])}</a>: {t}' + \
+            (f"\n  <i>{html.escape(why)}</i>" if why else "")
+    parts = [f"<b>🔎 Разбор выпуска · {period}</b>\nКандидатов после фильтра: {total}, взято: {len(sel['keep'])}"]
+    if sel["keep"]:
+        parts.append("<b>Взято</b>\n" + "\n".join(row(it, why) for it, why in sel["keep"]))
+    if sel["near"]:
+        parts.append("<b>Близко, но отклонено</b>\n" + "\n".join(row(it, why) for it, why in sel["near"]))
+    parts.append("<b>Черновик выпуска</b>\n\n" + (body or "<i>значимых новостей нет — выпуск не отправлялся бы</i>"))
+    return "\n\n".join(parts)
+
+
+def _run(store: "Store", hours: int | None, dry_run: bool, web: Path | None, review: bool = False) -> int:
     cfg = load_config()
-    if hours is None and not dry_run and weekend_skip(cfg, datetime.now(timezone.utc)):
+    if hours is None and not (dry_run or review) and weekend_skip(cfg, datetime.now(timezone.utc)):
         log("info", "выходной — выпуск не отправляю, новости войдут в выпуск понедельника")
         return 0
     matcher = Matcher(cfg)
@@ -895,44 +962,74 @@ def _run(store: "Store", hours: int | None, dry_run: bool, web: Path | None) -> 
     last = store.get("last_run")
     since = now - timedelta(hours=hours) if hours else \
         datetime.fromisoformat(last) if last else now - timedelta(hours=int(cfg.get("digest", {}).get("first_hours", 24)))
+    final = not (dry_run or review)          # настоящий выпуск: отправка и пометки «отправлено»
 
     health = Health(store.db, cfg)
-    LLM_ERRORS.clear()
     items = collect_telegram(net, cfg, since, store, matcher, health) + \
         collect_news(net, cfg, since, store, matcher, health)
     items = [i for i in dedup(items) if not store.seen(i["hash"])]
-    log("info", f"итого без дублей: {len(items)}")
-    if not items and not dry_run:
-        log("info", "ничего нового — дайджест не отправляю")
-        report = health_report(*health.problems(), [])
+    log("info", f"кандидатов после фильтра: {len(items)}")
+
+    alerts_new, alerts_fixed = health.problems() if final else ([], [])
+    sel = {"keep": [], "near": []}
+    body, period = "", ""
+    editor_ok = True
+    if items:
+        try:
+            period, body, sel = build_digest(net, cfg, items, since, now, published_titles(store))
+        except EditorUnavailable as e:
+            editor_ok = False
+            log("error", f"редактор недоступен, выпуск не публикуется: {e}")
+    if final and health._flag("_editor", not editor_ok):
+        (alerts_new if not editor_ok else alerts_fixed).append(
+            "• редактор ChatGPT не отвечает — выпуски не публикуются" if not editor_ok else "• редактор ChatGPT снова отвечает")
+    if final:
+        report = health_report(alerts_new, alerts_fixed)
         if report:
             send_owner(net, report)
-        store.put("last_run", now.isoformat())
+    if not editor_ok:
+        return 0                              # материалы не помечаем: войдут в следующий выпуск
+
+    text = f"<b>💼 Брокерский бизнес · {period}</b>\n\n{body}" if body.strip() else ""
+    if review:
+        send_owner(net, review_text(period or "—", text, sel, len(items)))
+        log("info", "разбор отправлен владельцу")
         return 0
-    period, body = build_digest(net, cfg, items, since, now)
-    if not body.strip():
-        log("info", "редактор не нашёл значимых новостей — выпуск не отправляю")
-        if not dry_run:
-            report = health_report(*health.problems(), LLM_ERRORS)
-            if report:
-                send_owner(net, report)
-            store.mark([i["key"] for i in items] + [i["hash"] for i in items])
-            store.put("last_run", now.isoformat())
-        return 0
-    text = f"<b>💼 Брокерский бизнес · {period}</b>\n\n{body}"
     if dry_run:
-        print(plain(text))
+        print(plain(review_text(period or "—", text, sel, len(items))))
         return 0
-    send_telegram(net, text)
-    report = health_report(*health.problems(), LLM_ERRORS)
-    if report:
-        send_owner(net, report)
+    if text:
+        send_telegram(net, text)
+        remember_published(store, body)
+        if web:
+            publish_web(web, {"at": now.isoformat(timespec="seconds"), "period": period,
+                              "count": len(items), "html": body})
+        log("info", "выпуск отправлен")
+    else:
+        log("info", "значимых новостей нет — выпуск не отправляю")
     store.mark([i["key"] for i in items] + [i["hash"] for i in items])
     store.put("last_run", now.isoformat())
-    if web:
-        publish_web(web, {"at": now.isoformat(timespec="seconds"), "period": period,
-                          "count": len(items), "html": body})
-    log("info", "дайджест отправлен")
+    return 0
+
+
+def cmd_candidates(hours: int) -> int:
+    """Кандидаты после первичного фильтра — без ChatGPT и без отправки (для настройки фильтра)."""
+    cfg = load_config()
+    with tempfile.TemporaryDirectory() as d:
+        store = Store(Path(d) / "tmp.db")
+        net, matcher = Net(), Matcher(cfg)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        health = Health(store.db, cfg)
+        items = dedup(collect_telegram(net, cfg, since, store, matcher, health) +
+                      collect_news(net, cfg, since, store, matcher, health))
+        for it in sort_items(cfg, items):
+            t = re.sub(r"\s+", " ", it["text"])[:160]
+            print(f"- [{', '.join(it['groups'])}] {it['source']} | {t}")
+        print(f"\nКандидатов: {len(items)}")
+        bad = [f"{lbl}: {err[:60]}" for src, (ok, err) in health.run.items() if not ok
+               for (lbl,) in store.db.execute("SELECT label FROM health WHERE src=?", (src,))]
+        print("Не ответили: " + ("; ".join(bad) if bad else "нет"))
+        store.close()
     return 0
 
 
@@ -962,14 +1059,22 @@ def cmd_channels() -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="brokernews")
     sub = p.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run", help="собрать и отправить дайджест")
+    r = sub.add_parser("run", help="собрать и отправить выпуск в канал")
     r.add_argument("--hours", type=int, help="за сколько часов (по умолчанию — с прошлого запуска)")
-    r.add_argument("--dry-run", action="store_true", help="показать, не отправлять")
-    r.add_argument("--web", type=Path, help="папка страницы архива (TRADER_WEB/news)")
+    r.add_argument("--dry-run", action="store_true", help="показать разбор здесь, ничего не отправлять")
+    r.add_argument("--web", type=Path, help="папка страницы архива (необязательно)")
+    v = sub.add_parser("review", help="разбор выпуска владельцу в Telegram, в канал ничего не уходит")
+    v.add_argument("--hours", type=int, default=24)
+    c = sub.add_parser("candidates", help="кандидаты после фильтра, без ChatGPT и отправки")
+    c.add_argument("--hours", type=int, default=72)
     sub.add_parser("channels", help="проверить Telegram-каналы")
     a = p.parse_args(argv)
     if a.cmd == "channels":
         return cmd_channels()
+    if a.cmd == "candidates":
+        return cmd_candidates(a.hours)
+    if a.cmd == "review":
+        return cmd_run(a.hours, False, None, review=True)
     return cmd_run(a.hours, a.dry_run, a.web)
 
 

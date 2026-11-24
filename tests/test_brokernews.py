@@ -1,6 +1,7 @@
 """Offline tests of the broker market digest (brokernews)."""
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 import tempfile
@@ -77,8 +78,9 @@ class Parsing(unittest.TestCase):
         self.assertEqual(len(items), 1)
 
     def test_channel_names(self):
-        cfg = {"telegram": {"channels": ["@a", "https://t.me/b", "A", "x|@y"], "channels_all": ["c"]}}
-        self.assertEqual(m.channel_names(cfg), [("c", True), ("a", False), ("b", False), ("x|y", False)])
+        cfg = {"telegram": {"channels": ["@a", "https://t.me/b", "A", "x|@y"], "promo_watch": ["c", "a"]}}
+        self.assertEqual(m.channel_names(cfg), [("a", "industry"), ("b", "industry"), ("x|y", "industry"),
+                                                ("c", "promo")])
 
     def test_alias_resolution_is_remembered(self):
         calls = []
@@ -116,7 +118,7 @@ class Filtering(unittest.TestCase):
         mt = m.Matcher(self.cfg)
         self.assertEqual(mt.match("СберИнвестиции запустили сервис"), ["СберИнвестиции"])
         self.assertEqual(mt.match("Сбербанк повысил ставки по сбережениям"), [])
-        self.assertIn("Брокеры", mt.match("Брокер Т-Инвестиции привлёк клиентов"))
+        self.assertIn("Брокерский бизнес", mt.match("Брокер Т-Инвестиции привлёк клиентов"))
         self.assertEqual(mt.match("Минфин о реформе ИИС-3"), ["Регулирование"])
         self.assertEqual(mt.match("Батон подорожал"), [])
         self.assertEqual(mt.match("Криптобиржа и брокер"), [])
@@ -125,12 +127,6 @@ class Filtering(unittest.TestCase):
         parts = m.split_message("a" * 9000 + "\nb\n" + "c" * 100)
         self.assertTrue(all(len(p) <= 3900 for p in parts))
         self.assertEqual("".join(parts).replace("\n", ""), "a" * 9000 + "b" + "c" * 100)
-
-    def test_fallback_digest_escapes(self):
-        items = [dict(text="A < B & Сбер", url="https://x/1?a=1&b=2", source="TG", groups=["Сбер"], date=NOW)]
-        out = m.fallback_digest(items)
-        self.assertIn("A &lt; B &amp; Сбер", out)
-        self.assertIn('href="https://x/1?a=1&amp;b=2"', out)
 
 
 class Render(unittest.TestCase):
@@ -200,68 +196,79 @@ class Marks(unittest.TestCase):
 
 
 class Editor(unittest.TestCase):
-    def test_two_stages_and_empty_issue(self):
-        items = [dict(text=f"материал {i}", url=f"https://x/{i}", source="СМИ", groups=["Брокеры"],
-                      date=NOW, kind="СМИ") for i in range(1, 5)]
+    items = [dict(text=f"материал {i}", url=f"https://x/{i}", source="СМИ", groups=["Брокерский бизнес"],
+                  date=NOW, kind="СМИ") for i in range(1, 5)]
+
+    def test_three_questions_two_stages_and_empty_issue(self):
         calls = []
 
-        def fake(net, cfg, system, user):
-            calls.append(system)
-            if "отбор" in system:
-                return {"keep": [2, 4]}
-            self.assertIn("[2] ", user)                                  # only 2 chosen materials
-            self.assertNotIn("материал 1", user)
+        def fake(net, cfg, system, user, model=None):
+            calls.append((model, user))
+            if "строгий редакторский отбор" in system:
+                self.assertIn("три вопроса", system)
+                self.assertIn("УЖЕ ОПУБЛИКОВАНО", user)
+                return {"keep": [{"n": 2, "why": "новый тариф"}, {"n": 4, "why": "решение ЦБ"}, {"n": 99}],
+                        "near": [{"n": 1, "why": "прогноз"}]}
+            self.assertNotIn("материал 1", user)                     # only the 2 chosen materials
+            self.assertIn("зачем: новый тариф", user)
             return {"main": [{"title": "Главное", "text": "t", "src": [1]}]}
 
         with unittest.mock.patch.object(m, "chat_json", fake):
-            _, body = m.build_digest(None, m.load_config(), items, NOW, NOW)
-        self.assertEqual(len(calls), 2)
-        self.assertIn('href="https://x/2"', body)                       # numbering of the chosen list
-        with unittest.mock.patch.object(m, "chat_json", lambda *a: {"keep": []}):
-            self.assertEqual(m.build_digest(None, m.load_config(), items, NOW, NOW)[1], "")
+            _, body, sel = m.build_digest(None, m.load_config(), self.items, NOW, NOW, ["старое"])
+        self.assertEqual(calls[0][0], "gpt-5")                          # strong model selects
+        self.assertEqual([it["url"] for it, _ in sel["keep"]], ["https://x/2", "https://x/4"])
+        self.assertEqual(sel["near"][0][1], "прогноз")
+        self.assertIn('href="https://x/2"', body)
+        with unittest.mock.patch.object(m, "chat_json", lambda *a, **k: {"keep": []}):
+            self.assertEqual(m.build_digest(None, m.load_config(), self.items, NOW, NOW)[1], "")
+
+    def test_editor_failure_never_publishes(self):
+        def boom(*a, **k):
+            raise RuntimeError("HTTP 502")
+        with unittest.mock.patch.object(m, "chat_json", boom):
+            with self.assertRaises(m.EditorUnavailable):
+                m.build_digest(None, m.load_config(), self.items, NOW, NOW)
+        with unittest.mock.patch.object(m, "chat_json", lambda *a, **k: None):   # no OpenAI key
+            with self.assertRaises(m.EditorUnavailable):
+                m.build_digest(None, m.load_config(), self.items, NOW, NOW)
+
+    def test_model_fallback(self):
+        calls = []
+
+        class Net:
+            def post_json(self, url, payload, headers=None, timeout=60):
+                calls.append(payload["model"])
+                if payload["model"] == "gpt-5":
+                    return 404, {"error": "model not found"}
+                return 200, {"choices": [{"message": {"content": '{"keep": []}'}}]}
+
+        with unittest.mock.patch.dict(os.environ, {"OPENAI_API_KEY": "k"}):
+            self.assertEqual(m.chat_json(Net(), m.load_config(), "s", "u", "gpt-5"), {"keep": []})
+        self.assertEqual(calls, ["gpt-5", "gpt-5-mini"])
 
 
 class HealthTest(unittest.TestCase):
-    def test_alerts_once_and_recovery(self):
+    def test_single_failures_are_silent_mass_failure_once(self):
         db = sqlite3.connect(":memory:")
-        cfg = {"health": {"fail_runs": 2, "silence_days": 7}}
-        old = NOW - timedelta(days=10)
 
-        def run(ok_a, ok_b, last_c=NOW):
-            h = m.Health(db, cfg)
-            h.record("tg:a", "@a", ok_a, NOW if ok_a else None, "нет страницы")
-            h.record("rss:b", "b.ru", ok_b, error="HTTP 500")
-            h.record("tg:c", "@c", True, last_c)
+        def run(n_down, total=6, promo_down=0):
+            h = m.Health(db, {})
+            for i in range(total):
+                h.record(f"tg:{i}", f"@{i}", i >= n_down)
+            for i in range(promo_down):
+                h.record(f"tgp:{i}", f"@p{i}", False)
             return h.problems()
 
-        self.assertEqual(run(False, True), ([], []))             # one failure is not a problem yet
-        new, fixed = run(False, False, old)
-        self.assertEqual(len(new), 2)                             # @a twice in a row + @c silent
-        self.assertTrue(any("@a: не загружается 2" in x for x in new))
-        self.assertTrue(any("@c: молчит 10" in x for x in new))
-        new, _ = run(False, False, old)
-        self.assertFalse(any("@a" in x or "@c" in x for x in new))  # already reported
-        self.assertTrue(any("b.ru" in x for x in new))
-        new, fixed = run(True, True)
-        self.assertEqual(new, [])
-        self.assertEqual(sorted(fixed), ["• @a", "• @c", "• b.ru"])
-
-    def test_mass_telegram_failure(self):
-        h = m.Health(sqlite3.connect(":memory:"), {})
-        for i in range(5):
-            h.record(f"tg:{i}", f"@{i}", i == 0)
-        new, _ = h.problems()
-        self.assertIn("не читаются 4 из 5", new[0])
-        h.run.clear()
-        for i in range(5):
-            h.record(f"tg:{i}", f"@{i}", i == 0)
-        self.assertFalse(any("не читаются" in x for x in h.problems()[0]))   # not repeated
+        self.assertEqual(run(1), ([], []))                      # one source down: log only
+        self.assertEqual(run(1, promo_down=5), ([], []))        # promo channels don't count
+        new, _ = run(4)
+        self.assertIn("не отвечают 4 из 6", new[0])
+        self.assertEqual(run(5), ([], []))                      # still down: not repeated
+        self.assertEqual(run(0)[1], ["• сбор источников снова работает"])
 
     def test_report_text(self):
-        self.assertIsNone(m.health_report([], [], []))
-        r = m.health_report(["• @a: молчит 8 дн."], [], ["HTTP 429"])
-        self.assertIn("служебное", r)
-        self.assertIn("HTTP 429", r)
+        self.assertIsNone(m.health_report([], []))
+        self.assertIn("служебное", m.health_report(["• x"], []))
 
 
 class FakeNet:
@@ -269,7 +276,7 @@ class FakeNet:
         self.sent = []
 
     def get(self, url, timeout=30):
-        if url.startswith("https://t.me/s/banksta"):
+        if url.startswith("https://t.me/s/sberinvestments"):
             html = TG_HTML.replace("2026-11-19T08:00:00+00:00", (NOW - timedelta(hours=1)).isoformat())
             return 200, html.encode()
         return 404, b""
@@ -280,51 +287,68 @@ class FakeNet:
 
 
 class Run(unittest.TestCase):
-    def test_run_sends_once_and_publishes(self):
+    def env(self, d):
+        return [unittest.mock.patch.object(m, "STATE", Path(d)),
+                unittest.mock.patch.object(m.time, "sleep", lambda s: None),
+                unittest.mock.patch.object(m, "weekend_skip", lambda *a: False),
+                unittest.mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "owner",
+                                                      "BROKERNEWS_CHAT_IDS": "channel", "OPENAI_API_KEY": "k"})]
+
+    def run_with(self, d, net, editor):
+        with contextlib.ExitStack() as st:
+            for p in self.env(d):
+                st.enter_context(p)
+            st.enter_context(unittest.mock.patch.object(m, "Net", lambda: net))
+            st.enter_context(unittest.mock.patch.object(m, "chat_json", editor))
+            m.cmd_run(None, False, None)
+
+    @staticmethod
+    def editor(net, cfg, system, user, model=None):
+        if "строгий редакторский отбор" in system:
+            return {"keep": [{"n": 1, "why": "продукт"}]}
+        return {"sections": {"sber": [{"title": "Снижение комиссии для ИИС", "text": "t", "src": [1]}]}}
+
+    def test_publishes_once_then_nothing_new(self):
         with tempfile.TemporaryDirectory() as d:
             net = FakeNet()
-            env = {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "1", "OPENAI_API_KEY": "",
-                   "BROKERNEWS_CHAT_IDS": ""}
-            with unittest.mock.patch.object(m, "STATE", Path(d)), \
-                    unittest.mock.patch.object(m, "Net", lambda: net), \
-                    unittest.mock.patch.object(m.time, "sleep", lambda s: None), \
-                    unittest.mock.patch.dict(os.environ, env):
-                m.cmd_run(24, False, Path(d) / "web")
-                digests = [p for p in net.sent if "Брокерский бизнес" in p["text"]]
-                alerts = [p for p in net.sent if "служебное" in p["text"]]
-                self.assertEqual(len(digests), 1)
-                self.assertIn("СберИнвестиции", digests[0]["text"])
-                self.assertIn("https://t.me/banksta/101", digests[0]["text"])
-                self.assertEqual(len(alerts), 1)  # the other channels don't answer in this test
-                self.assertIn("не читаются", alerts[0]["text"])
-                self.assertTrue((Path(d) / "web" / "data.json").exists())
-                m.cmd_run(24, False, None)       # nothing new: no digest, only "2 runs in a row" per channel
-                self.assertEqual(len([p for p in net.sent if "Брокерский бизнес" in p["text"]]), 1)
-                self.assertEqual(len(net.sent), 3)
-                self.assertIn("@frank_media: не загружается 2", net.sent[2]["text"])
-                self.assertNotIn("не читаются", net.sent[2]["text"])
+            self.run_with(d, net, self.editor)
+            to_channel = [p for p in net.sent if p["chat_id"] == "channel"]
+            self.assertEqual(len(to_channel), 1)
+            self.assertIn("Снижение комиссии для ИИС", to_channel[0]["text"])
+            self.assertIn("https://t.me/sberinvestments/101", to_channel[0]["text"])
+            alerts = [p for p in net.sent if p["chat_id"] == "owner"]
+            self.assertEqual(len(alerts), 1)                    # most sources down in this test: one alert
+            self.run_with(d, net, self.editor)
+            self.assertEqual(len([p for p in net.sent if p["chat_id"] == "channel"]), 1)
+            self.assertEqual(len(net.sent), 2)                  # nothing new, alert not repeated
+            store = m.Store(Path(d) / "brokernews.db")
+            self.assertIn("Снижение комиссии для ИИС", m.published_titles(store))
+            store.close()
 
-    def test_weekend_skip(self):
-        cfg = {"digest": {"weekdays_only": True}}
-        sat = datetime(2026, 11, 21, 6, tzinfo=timezone.utc)          # Saturday 09:00 MSK
-        fri = datetime(2026, 11, 20, 15, tzinfo=timezone.utc)         # Friday 18:00 MSK
-        sun_night = datetime(2026, 11, 22, 21, 30, tzinfo=timezone.utc)  # Monday 00:30 MSK
-        self.assertTrue(m.weekend_skip(cfg, sat))
-        self.assertFalse(m.weekend_skip(cfg, fri))
-        self.assertFalse(m.weekend_skip(cfg, sun_night))
-        self.assertFalse(m.weekend_skip({"digest": {"weekdays_only": False}}, sat))
-
-    def test_recipients(self):
-        with unittest.mock.patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "1", "BROKERNEWS_CHAT_IDS": ""}):
-            self.assertEqual(m.news_chats(), ["1"])
-        with unittest.mock.patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "1",
-                                                   "BROKERNEWS_CHAT_IDS": "-1001, @team "}):
-            self.assertEqual(m.news_chats(), ["-1001", "@team"])
+    def test_editor_down_publishes_nothing_and_keeps_items(self):
+        def boom(*a, **k):
+            raise RuntimeError("HTTP 502")
+        with tempfile.TemporaryDirectory() as d:
             net = FakeNet()
-            with unittest.mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "t"}), \
-                    unittest.mock.patch.object(m.time, "sleep", lambda s: None):
-                m.send_telegram(net, "текст")
-            self.assertEqual([p["chat_id"] for p in net.sent], ["-1001", "@team"])
+            self.run_with(d, net, boom)
+            self.assertEqual([p for p in net.sent if p["chat_id"] == "channel"], [])
+            owner = " ".join(p["text"] for p in net.sent if p["chat_id"] == "owner")
+            self.assertIn("редактор ChatGPT не отвечает", owner)
+            self.run_with(d, net, self.editor)                  # items were not marked: published now
+            self.assertEqual(len([p for p in net.sent if p["chat_id"] == "channel"]), 1)
+            self.assertIn("снова отвечает", " ".join(p["text"] for p in net.sent if p["chat_id"] == "owner"))
+
+    def test_review_goes_to_owner_only(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.ExitStack() as st:
+            for p in self.env(d):
+                st.enter_context(p)
+            net = FakeNet()
+            st.enter_context(unittest.mock.patch.object(m, "Net", lambda: net))
+            st.enter_context(unittest.mock.patch.object(m, "chat_json", self.editor))
+            m.cmd_run(24, False, None, review=True)
+            self.assertTrue(net.sent and all(p["chat_id"] == "owner" for p in net.sent))
+            self.assertIn("Разбор выпуска", net.sent[-1]["text"])
+            self.assertIn("продукт", net.sent[-1]["text"])
 
 
 if __name__ == "__main__":
