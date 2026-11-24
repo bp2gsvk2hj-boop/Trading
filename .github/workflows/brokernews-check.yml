@@ -8,5 +8,5 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Candidates after filter (72h), no ChatGPT, no sending
-        run: python3 -m brokernews candidates --hours 72
+      - name: Candidates after filter (7 days), no ChatGPT, no sending
+        run: python3 -m brokernews candidates --hours 168

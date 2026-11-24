@@ -71,6 +71,16 @@ class Parsing(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             m.parse_yandex_xml(b"<yandexsearch><response><error code='32'>limit</error></response></yandexsearch>")
 
+    def test_hopelessly_broken_feed_parsed_loosely(self):
+        bad = ("<?xml version='1.0'?><rss><channel><title>Banki</title><item><title>ИИС-3 & вычет <3 </title>"
+               "<link>https://banki.ru/1</link><pubDate>Mon, 24 Nov 2026 07:00:00 +0300</pubDate>"
+               "<description><![CDATA[<p>Текст</p>]]></description></item></channel></rss>")
+        title, items = m.parse_feed(bad.encode())
+        self.assertEqual(title, "Banki")
+        self.assertEqual(items[0]["link"], "https://banki.ru/1")
+        self.assertEqual(items[0]["summary"], "Текст")
+        self.assertEqual(items[0]["date"], datetime(2026, 11, 24, 4, tzinfo=timezone.utc))
+
     def test_broken_feed_is_repaired(self):
         bad = RSS.replace("<title>Google Новости</title>", "<title>Банки.ру & Co\x01</title>")
         title, items = m.parse_feed(bad.encode())

@@ -389,9 +389,43 @@ def xml_root(body: bytes) -> ET.Element:
         return ET.fromstring(text)
 
 
+def _tag(block: str, name: str) -> str:
+    m = re.search(rf"<{name}(?:\s[^>]*)?>(.*?)</{name}>", block, re.S | re.I)
+    if not m:
+        return ""
+    v = m.group(1).strip()
+    c = re.fullmatch(r"<!\[CDATA\[(.*?)\]\]>", v, re.S)
+    return c.group(1) if c else v
+
+
+def parse_feed_loose(body: bytes) -> tuple[str, list[dict]]:
+    """Запасной разбор RSS, если XML сломан так, что не чинится: по тегам <item>."""
+    text = body.decode("utf-8", errors="replace")
+    head = text.split("<item", 1)[0]
+    out = []
+    for block in re.findall(r"<item[\s>](.*?)</item>", text, re.S | re.I):
+        d = _tag(block, "pubDate")
+        try:
+            dt = email.utils.parsedate_to_datetime(html.unescape(d)) if d else None
+            if dt and dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            dt = None
+        out.append(dict(title=strip_html(html.unescape(_tag(block, "title"))),
+                        summary=strip_html(html.unescape(_tag(block, "description"))),
+                        link=html.unescape(_tag(block, "link")).strip(), date=dt,
+                        source=strip_html(_tag(block, "source")), source_url=""))
+    if not out:
+        raise ValueError("лента не разбирается")
+    return strip_html(html.unescape(_tag(head, "title"))), out
+
+
 def parse_feed(body: bytes) -> tuple[str, list[dict]]:
     """RSS 2.0 и Atom -> (название ленты, [{title, summary, link, date, source}])."""
-    root = xml_root(body)
+    try:
+        root = xml_root(body)
+    except ET.ParseError:
+        return parse_feed_loose(body)
     atom = "{http://www.w3.org/2005/Atom}"
     out = []
     if root.tag == atom + "feed":
@@ -491,6 +525,7 @@ def collect_news(net, cfg, since, store, matcher, health: "Health | None" = None
     материалы про СберИнвестиции — остальное там прогнозы и обзоры, не новости отрасли."""
     official = [d.lower() for d in cfg.get("news", {}).get("official_domains", [])]
     analytics = [d.lower() for d in cfg.get("news", {}).get("analytics_domains", [])]
+    foreign = tuple(cfg.get("news", {}).get("foreign_tlds", []))     # рынки других стран
     items = []
     for url, label in news_urls(cfg):
         try:
@@ -515,7 +550,7 @@ def collect_news(net, cfg, since, store, matcher, health: "Health | None" = None
             text = f"{title}. {summary}" if summary and summary[:40] not in title else title
             groups = matcher.match(text)
             d = domain(en.get("source_url") or en["link"])
-            if domain_in(d, analytics) and SBER not in groups:
+            if (domain_in(d, analytics) and SBER not in groups) or (foreign and d.endswith(foreign)):
                 continue
             if groups:
                 kind = "официально" if domain_in(d, official) else "СМИ"
@@ -542,7 +577,7 @@ def collect_news(net, cfg, since, store, matcher, health: "Health | None" = None
                 text = f"{en['title']}. {en['summary']}" if en["summary"] else en["title"]
                 groups = matcher.match(text)
                 d = domain(en["link"])
-                if domain_in(d, analytics) and SBER not in groups:
+                if (domain_in(d, analytics) and SBER not in groups) or (foreign and d.endswith(foreign)):
                     continue
                 if groups:
                     kind = "официально" if domain_in(d, official) else "СМИ"
