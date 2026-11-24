@@ -24,6 +24,7 @@ channels = [
   "interfaxonline",           # Интерфакс
   "rbc_news",                 # РБК
   "finamalert",               # Финам (корпоративный канал; из рынка фильтр пропустит только деловое)
+  "tb_invest_official",       # Т-Инвестиции (официальный канал)
 ]
 # Рыночные каналы владельца: здесь в основном котировки, облигации и идеи, поэтому из них
 # берём ТОЛЬКО посты про СберИнвестиции и собственные продукты Сбера (посевы, промо).
@@ -34,7 +35,7 @@ promo_watch = [
 ]
 # Официальные каналы компаний и регуляторов — в выпуске помечаются 🏛
 official = ["sberinvestments", "naufortelegram", "centralbank_russia", "MoscowExchangeOfficial", "brokervtb",
-            "cbonds", "moex_derivatives"]
+            "cbonds", "moex_derivatives", "tb_invest_official"]
 max_pages = 3            # страниц по ~20 постов с канала за запуск
 
 [news]
