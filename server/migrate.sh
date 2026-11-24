@@ -52,7 +52,7 @@ ufw delete allow 8080/tcp >/dev/null 2>&1 || true" \
   || die "Установка робота на $NEW не прошла. Чтобы вернуть робота сюда: systemctl enable --now $TIMERS"
 
 say "4/4 Мониторинг VPN и данные «Помощника трейдера» — теперь с нового сервера"
-systemctl disable --now vpn-stats.timer trader-publish.timer >/dev/null 2>&1
+for u in vpn-stats.timer trader-publish.timer; do systemctl disable --now "$u" >/dev/null 2>&1; done
 $SSH "set -e
 [ -f /usr/local/etc/xray/stats.env ] || exit 0
 curl -fsSL $RAW/vpn/vpn-stats.sh -o /tmp/vpn-stats.sh && bash /tmp/vpn-stats.sh install >/dev/null
